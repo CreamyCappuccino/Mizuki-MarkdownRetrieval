@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Mapping
 
+from .indexing import DocumentSnapshot
 from .project_config import ProjectConfigError, RuntimeScope
-from .refresh import apply_refresh, prepare_refresh
-from .sqlite_runtime import open_sqlite_apply_provider, sqlite_index_matches_snapshots
+from .refresh import RefreshPlan, apply_refresh, prepare_refresh
+from .sqlite_runtime import open_sqlite_apply_provider, preflight_sqlite_index
+
+
+class DurableIndexDriftError(RuntimeError):
+    pass
 
 
 def run_refresh_command(
@@ -32,21 +37,29 @@ def run_refresh_command(
         provider_revision=search.representation_revision,
     )
 
-    if not refresh.changed_count and not sqlite_index_matches_snapshots(
-        search.database_path,
-        namespace=refresh.namespace,
-        representation_revision=search.representation_revision,
-        snapshots=refresh.index_plan.snapshots,
-        toolkit=toolkit,
-    ):
-        refresh = prepare_refresh(
-            runtime.scope,
-            runtime.state_path,
-            full_reindex_threshold=runtime.full_reindex_threshold,
-            chunk_profile=runtime.chunk_profile,
-            provider_revision=search.representation_revision,
-            force_full_reindex=True,
+    baseline_revision = _baseline_provider_revision(refresh.baseline_snapshots)
+    if baseline_revision is not None:
+        preflight = preflight_sqlite_index(
+            search.database_path,
+            namespace=refresh.namespace,
+            representation_revision=baseline_revision,
+            snapshots=refresh.baseline_snapshots,
+            toolkit=toolkit,
         )
+        if preflight.status == "mismatch":
+            raise DurableIndexDriftError(
+                "durable index does not match committed refresh state; "
+                "refusing partial refresh"
+            )
+        if preflight.status == "missing" and refresh.baseline_snapshots:
+            refresh = prepare_refresh(
+                runtime.scope,
+                runtime.state_path,
+                full_reindex_threshold=runtime.full_reindex_threshold,
+                chunk_profile=runtime.chunk_profile,
+                provider_revision=search.representation_revision,
+                force_full_reindex=True,
+            )
 
     provider = None
     if refresh.changed_count:
@@ -76,6 +89,25 @@ def run_refresh_command(
         if payload["apply_id"] is not None:
             print(f"apply_id={payload['apply_id']}")
     return 0
+
+
+def _baseline_provider_revision(
+    snapshots: Mapping[str, DocumentSnapshot],
+) -> str | None:
+    if not snapshots:
+        return None
+    revisions = {snapshot.provider_revision for snapshot in snapshots.values()}
+    if len(revisions) != 1:
+        raise DurableIndexDriftError(
+            "committed refresh state contains multiple provider revisions"
+        )
+    revision = next(iter(revisions))
+    if revision.startswith("legacy-provider-v"):
+        # Old state schemas did not persist the durable provider revision. Their
+        # provider mismatch already forces a fresh all-current reindex, but there
+        # is no trustworthy revision with which to open the old store preflight.
+        return None
+    return revision
 
 
 def _refresh_payload(scope_name: str, refresh: Any, result: Any | None) -> dict[str, object]:
