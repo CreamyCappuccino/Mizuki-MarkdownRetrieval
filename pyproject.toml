@@ -13,8 +13,16 @@ authors = [{ name = "Mizuki / CreamyCappuccino" }]
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "mcp>=2,<3"]
-mcp = ["mcp>=2,<3"]
+dev = [
+  "pytest>=8",
+  "mcp>=2.1.1,<2.2",
+  "PyJWT[crypto]>=2.13,<3",
+]
+mcp = ["mcp>=2.1.1,<2.2"]
+remote = [
+  "mcp>=2.1.1,<2.2",
+  "PyJWT[crypto]>=2.13,<3",
+]
 
 [project.scripts]
 mizuki-mdr = "mizuki_markdown_retrieval.cli:main"
