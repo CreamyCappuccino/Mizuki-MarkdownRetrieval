@@ -244,6 +244,33 @@ include:
 
 Each configured root becomes a retrieval `namespace`/scope. A search must not escape that scope unless the caller explicitly selects a broader configured namespace.
 
+### Optional recursive / inherited folder configuration
+
+Folder configuration should support an optional inheritance mode for projects with many nested directories. When enabled, a parent folder configuration may apply to descendant folders without requiring each child directory to be declared separately.
+
+Conceptual behavior:
+
+```yaml
+name: project-docs
+root: /project/docs
+mode: include_all_except
+recursive: true
+exclude:
+  - archive/**
+  - drafts/**
+```
+
+Design goals:
+
+- inheritance is optional, not forced for every namespace;
+- descendant Markdown files inherit the nearest applicable parent configuration;
+- a child scope may explicitly disable inheritance or override include/exclude rules;
+- effective configuration should be inspectable for diagnostics;
+- scope identity must remain deterministic even when configuration is inherited;
+- recursion should not silently cross symlinked or otherwise external filesystem boundaries unless explicitly allowed.
+
+This is primarily a reusable adapter capability rather than a requirement for the first MM307 semantic-rule use case. It should be designed early so projects with tens of subfolders do not require repetitive configuration, but implementation may follow the minimum vertical slice.
+
 Paths visible through CLI/MCP must be limited to configured/indexed sources rather than exposing the Mac filesystem generally.
 
 ## 6. Markdown chunking
