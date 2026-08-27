@@ -50,12 +50,14 @@ Implemented:
 - Bounded `hit / around / full` Markdown read views with scope/include/exclude/symlink enforcement and explicit `max_chars` truncation.
 - TOML project configuration with multiple named scopes.
 - Read-only CLI commands: `validate`, `discover`, `plan`, `read`, `search`.
+- Explicit durable index mutation command: `refresh`.
 - Local read-only MCP v2 server with explicit safety annotations and bounded tool schemas.
+- MCP client acceptance tests for in-memory and real stdio process transport.
 - GitHub Actions pytest CI.
 
 The Markdown boundary has been independently tested against the shared Retrieval Toolkit v0 implementation, including self-exclusion, document grouping, metadata round-trip, fail-closed namespace filtering, atomic persistent apply, durable reopen, and related-document search.
 
-`tests/test_cross_repo_sqlite_e2e.py` is an optional real integration test. It runs when the shared `retrieval_toolkit`/SearchE package is available on `PYTHONPATH`; the public standalone CI skips it rather than requiring access to a separate private repository. The shared SearchE environment has also executed this test without the skip and passed the full cross-repository flow.
+`tests/test_cross_repo_sqlite_e2e.py` is an optional real integration test. It runs when the shared `retrieval_toolkit`/SearchE package is available on `PYTHONPATH`; the public standalone CI skips it rather than requiring access to a separate private repository. `tests/test_cross_repo_mcp_client_acceptance.py` additionally exercises literal, semantic, and hybrid search through an MCP client when a real Ruri model is supplied through `MIZUKI_MDR_RURI_MODEL_PATH`.
 
 ## Local/private material
 
@@ -90,7 +92,7 @@ mode = "include_only"
 include = ["approved.md", "**/approved.md"]
 ```
 
-For the read-only MCP/search runtime, pin the durable index and representation details inside the scope instead of accepting arbitrary database/model paths from tool callers:
+Pin the durable SearchE runtime inside the scope instead of accepting arbitrary database/model paths from MCP callers or the mutating refresh command:
 
 ```toml
 [scope.search]
@@ -100,7 +102,7 @@ model_path = "/path/to/ruri-v3-310m"
 device = "cpu"
 ```
 
-`model_path` may be omitted when only literal search is needed.
+`representation_revision` is part of the durable provider/apply identity. Bump it whenever the embedding model, provider representation, or another stored-vector compatibility input changes. `model_path` may be omitted for literal-only read/search use, but `refresh` requires it because changed chunks may need new embeddings.
 
 ## CLI
 
@@ -112,7 +114,23 @@ mizuki-mdr --config markdown-retrieval.toml discover rules
 mizuki-mdr --config markdown-retrieval.toml plan rules
 ```
 
-`plan` is intentionally read-only. It does **not** advance persisted state. Integration code should call the shared persistent provider first and commit local state only after the provider reports successful durable application.
+`plan` is intentionally read-only. It does **not** advance persisted state.
+
+### Durable index refresh
+
+`refresh` is the one explicit durable-index mutation command. It reads the database path, model path, representation revision, and device from the selected scope's `[scope.search]` configuration; there are no CLI flags that redirect the mutation to an arbitrary database or model.
+
+```bash
+mizuki-mdr --config markdown-retrieval.toml refresh rules
+```
+
+The command uses the shared atomic apply contract:
+
+1. discover and plan the current Markdown state;
+2. if changes exist, open the configured writable SearchE SQLite provider and apply the complete desired version atomically;
+3. commit the local snapshot only after provider success.
+
+A provider failure leaves the local state snapshot untouched. If no Markdown or representation change is pending, the command does not open the embedding/provider runtime and reports `status=unchanged` after reconciling the snapshot.
 
 ### Bounded reads
 
@@ -165,7 +183,7 @@ Programmatic integrations can use `apply_refresh()` for the atomic apply-before-
 
 ## MCP server
 
-The first MCP surface is intentionally **local and read-only**. Install the MCP extra and run it over stdio:
+The local MCP v0 surface is intentionally **stdio, configured-scope-only, bounded, and read-only**. Install the MCP extra and run it over stdio:
 
 ```bash
 python -m pip install -e '.[mcp]'
@@ -181,13 +199,15 @@ Exposed tools:
 
 All four tools explicitly advertise `readOnlyHint=true`, `destructiveHint=false`, `idempotentHint=true`, and `openWorldHint=false`. Those annotations are client hints only; safety is also enforced in server-side scope/path validation and by opening the durable SQLite provider in true read-only mode.
 
-The MCP server does **not** expose arbitrary filesystem roots, database paths, model paths, or provider revisions as tool inputs. Those are fixed in the TOML scope configuration. The initial server supports stdio only. Public Streamable HTTP/OAuth publication remains a separate acceptance phase and should not be enabled until authentication, resource/audience checks, descriptor validation, and real-client tests are complete.
+The MCP server does **not** expose arbitrary filesystem roots, database paths, model paths, provider revisions, or index-refresh mutation as tool inputs. Those runtime details are fixed in the TOML scope configuration. Normal MCP `content` is compact model-facing plain text while the full payload remains in `structuredContent`.
+
+The v0 boundary has been accepted against the shared SearchE environment, including real Ruri literal/semantic/hybrid search, provider lifecycle reuse, missing-database fail-closed behavior, required read-view intent, and compact content plus structured payload. Public Streamable HTTP/OAuth publication remains a separate phase and should not be enabled until authentication, resource/audience checks, descriptor validation, and real-client tests are complete.
 
 ## Not implemented yet
 
 - A persistent SearchE provider bundled inside this repository. Persistent providers remain a shared SearchE/Toolkit responsibility and are injected at integration time.
-- CLI command that mutates/builds the durable SearchE index; current CLI search is intentionally read-only.
 - File watching / automatic refresh loop.
+- Public Streamable HTTP/OAuth connector publication.
 - Optional later GraphRAG operators.
 
 These remain separate from the Markdown parsing/index-planning layer so the adapter does not absorb SearchE or Toolkit responsibilities.
