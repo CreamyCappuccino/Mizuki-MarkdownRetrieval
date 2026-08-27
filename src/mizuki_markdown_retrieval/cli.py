@@ -7,6 +7,7 @@ from typing import Sequence
 
 from .discovery import discover_markdown
 from .project_config import load_project_config
+from .reading import read_markdown_view
 from .refresh import prepare_refresh
 
 
@@ -67,6 +68,43 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("state not committed (plan is read-only)")
         return 0
 
+    if args.command == "read":
+        result = read_markdown_view(
+            runtime.scope,
+            args.path,
+            view=args.view,
+            line_start=args.line_start,
+            line_end=args.line_end,
+            context_lines=args.context_lines,
+            max_chars=args.max_chars,
+        )
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "scope": runtime.name,
+                        "namespace": result.namespace,
+                        "path": result.relative_path,
+                        "view": result.view,
+                        "line_start": result.line_start,
+                        "line_end": result.line_end,
+                        "total_lines": result.total_lines,
+                        "truncated": result.truncated,
+                        "text": result.text,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+        else:
+            print(
+                f"scope={runtime.name} path={result.relative_path} view={result.view} "
+                f"lines={result.line_start}-{result.line_end}/{result.total_lines} "
+                f"truncated={str(result.truncated).lower()}"
+            )
+            print(result.text, end="" if result.text.endswith("\n") else "\n")
+        return 0
+
     parser.error(f"unknown command: {args.command}")
     return 2
 
@@ -92,6 +130,16 @@ def _build_parser() -> argparse.ArgumentParser:
     plan = subparsers.add_parser("plan", help="compute an incremental refresh plan")
     plan.add_argument("scope", help="scope name from config")
     plan.add_argument("--json", action="store_true")
+
+    read = subparsers.add_parser("read", help="read a configured Markdown file safely")
+    read.add_argument("scope", help="scope name from config")
+    read.add_argument("path", help="relative Markdown path inside the scope")
+    read.add_argument("--view", choices=("hit", "around", "full"), default="hit")
+    read.add_argument("--line-start", type=int)
+    read.add_argument("--line-end", type=int)
+    read.add_argument("--context-lines", type=int, default=20)
+    read.add_argument("--max-chars", type=int, default=50_000)
+    read.add_argument("--json", action="store_true")
     return parser
 
 
