@@ -64,4 +64,5 @@ def open_sqlite_search_provider(
         Path(database_path).expanduser().resolve(),
         embedding_provider=embedding_provider,
         representation_revision=representation_revision,
+        read_only=True,
     )
