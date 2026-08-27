@@ -8,7 +8,8 @@ from typing import Mapping
 
 from .indexing import ChunkSnapshot, DocumentSnapshot
 
-STATE_SCHEMA_VERSION = 2
+STATE_SCHEMA_VERSION = 3
+_SUPPORTED_SCHEMA_VERSIONS = {2, 3}
 
 
 class StateFormatError(ValueError):
@@ -23,10 +24,9 @@ def load_state(path: Path) -> dict[str, DocumentSnapshot]:
     except (OSError, json.JSONDecodeError) as exc:
         raise StateFormatError(f"failed to read index state: {path}") from exc
 
-    if payload.get("schema_version") != STATE_SCHEMA_VERSION:
-        raise StateFormatError(
-            f"unsupported state schema: {payload.get('schema_version')!r}"
-        )
+    schema_version = payload.get("schema_version")
+    if schema_version not in _SUPPORTED_SCHEMA_VERSIONS:
+        raise StateFormatError(f"unsupported state schema: {schema_version!r}")
 
     documents = payload.get("documents")
     if not isinstance(documents, list):
@@ -35,6 +35,11 @@ def load_state(path: Path) -> dict[str, DocumentSnapshot]:
     result: dict[str, DocumentSnapshot] = {}
     try:
         for item in documents:
+            representation_revision = (
+                str(item["representation_revision"])
+                if schema_version >= 3
+                else "legacy-v2"
+            )
             snapshot = DocumentSnapshot(
                 namespace=str(item["namespace"]),
                 document_id=str(item["document_id"]),
@@ -49,6 +54,7 @@ def load_state(path: Path) -> dict[str, DocumentSnapshot]:
                     )
                     for chunk in item.get("chunks", [])
                 ),
+                representation_revision=representation_revision,
             )
             if snapshot.document_id in result:
                 raise StateFormatError(
@@ -75,6 +81,7 @@ def save_state(
                 "source_version": snapshot.source_version,
                 "file_hash": snapshot.file_hash,
                 "relative_path": snapshot.relative_path,
+                "representation_revision": snapshot.representation_revision,
                 "chunks": [
                     {
                         "chunk_id": chunk.chunk_id,
