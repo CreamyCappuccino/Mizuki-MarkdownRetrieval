@@ -33,6 +33,8 @@ class RemoteOAuthConfig:
     max_token_lifetime_seconds: int = 3600
     jwks_timeout_seconds: float = 5.0
     jwks_cache_seconds: float = 300.0
+    unknown_kid_cooldown_seconds: float = 10.0
+    max_unknown_kids: int = 256
 
     def __post_init__(self) -> None:
         _validate_https_url(self.issuer, field="issuer", allow_query=False)
@@ -50,6 +52,10 @@ class RemoteOAuthConfig:
             raise ValueError("jwks_timeout_seconds must be between 0.1 and 30")
         if not 1 <= self.jwks_cache_seconds <= 86_400:
             raise ValueError("jwks_cache_seconds must be between 1 and 86400")
+        if not 1 <= self.unknown_kid_cooldown_seconds <= 300:
+            raise ValueError("unknown_kid_cooldown_seconds must be between 1 and 300")
+        if not 16 <= self.max_unknown_kids <= 4096:
+            raise ValueError("max_unknown_kids must be between 16 and 4096")
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "RemoteOAuthConfig":
@@ -88,6 +94,7 @@ class SharedOAuthJWTVerifier(TokenVerifier):
     ) -> None:
         self.config = config
         self._now_fn = now_fn
+        self._unknown_kids: dict[str, float] = {}
         self._jwk_client: SigningKeyClient = jwk_client or PyJWKClient(
             config.jwks_url,
             cache_keys=False,
@@ -121,7 +128,7 @@ class SharedOAuthJWTVerifier(TokenVerifier):
         if not isinstance(kid, str) or not kid or len(kid) > _MAX_KID_CHARS:
             raise ValueError("invalid kid")
 
-        signing_key = self._jwk_client.get_signing_key(kid)
+        signing_key = self._get_signing_key(kid)
         claims = jwt.decode(
             token,
             signing_key.key,
@@ -151,6 +158,38 @@ class SharedOAuthJWTVerifier(TokenVerifier):
             subject=claims["sub"],
             claims=safe_claims,
         )
+
+    def _get_signing_key(self, kid: str):
+        now = float(self._now_fn())
+        blocked_until = self._unknown_kids.get(kid)
+        if blocked_until is not None:
+            if blocked_until > now:
+                raise ValueError("unknown kid is cooling down")
+            self._unknown_kids.pop(kid, None)
+
+        try:
+            signing_key = self._jwk_client.get_signing_key(kid)
+        except Exception:
+            self._remember_unknown_kid(kid, now=now)
+            raise
+
+        self._unknown_kids.pop(kid, None)
+        return signing_key
+
+    def _remember_unknown_kid(self, kid: str, *, now: float) -> None:
+        expired = [
+            cached_kid
+            for cached_kid, deadline in self._unknown_kids.items()
+            if deadline <= now
+        ]
+        for cached_kid in expired:
+            self._unknown_kids.pop(cached_kid, None)
+
+        if len(self._unknown_kids) >= self.config.max_unknown_kids:
+            oldest = min(self._unknown_kids, key=self._unknown_kids.get)
+            self._unknown_kids.pop(oldest, None)
+
+        self._unknown_kids[kid] = now + self.config.unknown_kid_cooldown_seconds
 
     def _validate_claims(self, claims: Mapping[str, Any]) -> None:
         if claims.get("iss") != self.config.issuer:
