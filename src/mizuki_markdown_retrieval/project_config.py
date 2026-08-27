@@ -14,12 +14,21 @@ class ProjectConfigError(ValueError):
 
 
 @dataclass(frozen=True)
+class SearchRuntimeConfig:
+    database_path: Path
+    representation_revision: str
+    model_path: Path | None = None
+    device: str = "cpu"
+
+
+@dataclass(frozen=True)
 class RuntimeScope:
     name: str
     scope: ScopeConfig
     state_path: Path
     chunk_profile: str = "medium"
     full_reindex_threshold: float = 0.5
+    search: SearchRuntimeConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -96,12 +105,47 @@ def _parse_scope(raw: object, base_dir: Path) -> RuntimeScope:
             f"full_reindex_threshold for {name} must be between 0 and 1"
         )
 
+    search = _parse_search_runtime(raw.get("search"), base_dir, name)
+
     return RuntimeScope(
         name=name,
         scope=scope,
         state_path=state_path,
         chunk_profile=chunk_profile,
         full_reindex_threshold=threshold,
+        search=search,
+    )
+
+
+def _parse_search_runtime(
+    raw: object,
+    base_dir: Path,
+    scope_name: str,
+) -> SearchRuntimeConfig | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ProjectConfigError(f"scope.search for {scope_name} must be a table")
+
+    database_path = _resolve_path(base_dir, _required_text(raw, "database_path"))
+    revision = _required_text(raw, "representation_revision")
+    model_raw = raw.get("model_path")
+    if model_raw is None:
+        model_path = None
+    elif isinstance(model_raw, str) and model_raw.strip():
+        model_path = _resolve_path(base_dir, model_raw.strip())
+    else:
+        raise ProjectConfigError(
+            f"model_path for {scope_name} must be non-empty text when provided"
+        )
+    device = str(raw.get("device", "cpu")).strip()
+    if not device:
+        raise ProjectConfigError(f"device for {scope_name} must not be blank")
+    return SearchRuntimeConfig(
+        database_path=database_path,
+        representation_revision=revision,
+        model_path=model_path,
+        device=device,
     )
 
 
