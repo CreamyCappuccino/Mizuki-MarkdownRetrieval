@@ -95,11 +95,14 @@ def test_http_resource_server_exposes_discovery_auth_gate_and_safe_tool(
         token_verifier=StaticVerifier(),
         settings=_settings(),
     )
+    settings = _settings()
     app = server.streamable_http_app(
         streamable_http_path="/mcp",
         json_response=True,
         stateless_http=True,
-        host="mdr.test",
+        host=settings.host,
+        transport_security=settings.transport_security(),
+        max_request_body_size=settings.max_request_body_size,
     )
 
     async def scenario() -> None:
@@ -134,6 +137,36 @@ def test_http_resource_server_exposes_discovery_auth_gate_and_safe_tool(
                     headers={"Authorization": "Bearer wrong-scope"},
                 )
                 assert wrong_scope.status_code == 403
+
+                bad_host = await http.post(
+                    "/mcp",
+                    json={},
+                    headers={
+                        "Authorization": "Bearer good-token",
+                        "Host": "evil.test",
+                    },
+                )
+                assert bad_host.status_code == 421
+
+                bad_origin = await http.post(
+                    "/mcp",
+                    json={},
+                    headers={
+                        "Authorization": "Bearer good-token",
+                        "Origin": "https://evil.test",
+                    },
+                )
+                assert bad_origin.status_code == 403
+
+                oversized = await http.post(
+                    "/mcp",
+                    content=b"x" * (settings.max_request_body_size + 1),
+                    headers={
+                        "Authorization": "Bearer good-token",
+                        "Content-Type": "application/json",
+                    },
+                )
+                assert oversized.status_code == 413
 
             async with httpx2.AsyncClient(
                 transport=transport,
@@ -188,7 +221,12 @@ def test_ready_route_returns_503_without_leaking_internal_paths(
         token_verifier=StaticVerifier(),
         settings=_settings(),
     )
-    app = server.streamable_http_app(host="mdr.test")
+    settings = _settings()
+    app = server.streamable_http_app(
+        host=settings.host,
+        transport_security=settings.transport_security(),
+        max_request_body_size=settings.max_request_body_size,
+    )
 
     async def scenario() -> None:
         transport = httpx2.ASGITransport(app=app)
