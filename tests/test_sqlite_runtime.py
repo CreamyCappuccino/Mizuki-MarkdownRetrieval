@@ -5,8 +5,10 @@ from types import SimpleNamespace
 
 import pytest
 
+import mizuki_markdown_retrieval.sqlite_runtime as sqlite_runtime
 from mizuki_markdown_retrieval.sqlite_runtime import (
     SearchRuntimeUnavailableError,
+    open_sqlite_apply_provider,
     open_sqlite_search_provider,
 )
 
@@ -24,6 +26,12 @@ class FakeSQLiteIndexProvider:
         self.embedding_provider = embedding_provider
         self.representation_revision = representation_revision
         self.read_only = read_only
+
+
+class FakeRuriEmbeddingProvider:
+    def __init__(self, model_path, *, device="cpu"):
+        self.model_path = Path(model_path)
+        self.device = device
 
 
 def test_literal_runtime_opens_without_embedding_model(tmp_path: Path) -> None:
@@ -53,6 +61,39 @@ def test_semantic_runtime_requires_model_path(tmp_path: Path) -> None:
         )
 
 
+def test_apply_runtime_opens_writable_provider_with_configured_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    toolkit = SimpleNamespace(SQLiteIndexProvider=FakeSQLiteIndexProvider)
+    fake_module = SimpleNamespace(RuriEmbeddingProvider=FakeRuriEmbeddingProvider)
+    monkeypatch.setattr(sqlite_runtime, "import_module", lambda name: fake_module)
+
+    provider = open_sqlite_apply_provider(
+        tmp_path / "index.sqlite3",
+        representation_revision="fixture-v2",
+        model_path=tmp_path / "ruri-model",
+        device="mps",
+        toolkit=toolkit,
+    )
+
+    assert provider.database_path == (tmp_path / "index.sqlite3").resolve()
+    assert provider.representation_revision == "fixture-v2"
+    assert provider.read_only is False
+    assert provider.embedding_provider.model_path == tmp_path / "ruri-model"
+    assert provider.embedding_provider.device == "mps"
+
+
+def test_apply_runtime_requires_model_path(tmp_path: Path) -> None:
+    toolkit = SimpleNamespace(SQLiteIndexProvider=FakeSQLiteIndexProvider)
+    with pytest.raises(ValueError, match="model_path"):
+        open_sqlite_apply_provider(
+            tmp_path / "index.sqlite3",
+            representation_revision="fixture-v1",
+            model_path=None,
+            toolkit=toolkit,
+        )
+
+
 def test_runtime_rejects_invalid_mode_and_blank_revision(tmp_path: Path) -> None:
     toolkit = SimpleNamespace(SQLiteIndexProvider=FakeSQLiteIndexProvider)
     with pytest.raises(ValueError, match="mode"):
@@ -67,6 +108,13 @@ def test_runtime_rejects_invalid_mode_and_blank_revision(tmp_path: Path) -> None
             tmp_path / "index.sqlite3",
             representation_revision="  ",
             mode="literal",
+            toolkit=toolkit,
+        )
+    with pytest.raises(ValueError, match="revision"):
+        open_sqlite_apply_provider(
+            tmp_path / "index.sqlite3",
+            representation_revision=" ",
+            model_path=tmp_path / "model",
             toolkit=toolkit,
         )
 
