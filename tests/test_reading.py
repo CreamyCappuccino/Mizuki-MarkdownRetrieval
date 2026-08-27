@@ -67,6 +67,26 @@ def test_full_view_reports_truncation(tmp_path) -> None:
     assert result.line_end == 1
 
 
+def test_truncated_full_view_reports_actual_returned_line_end(tmp_path) -> None:
+    (tmp_path / "big.md").write_text(
+        "one\ntwo\nthree\nfour\n",
+        encoding="utf-8",
+    )
+
+    result = read_markdown_view(
+        _scope(tmp_path),
+        "big.md",
+        view="full",
+        max_chars=9,
+    )
+
+    assert result.text == "one\ntwo\nt"
+    assert result.truncated is True
+    assert result.line_start == 1
+    assert result.line_end == 3
+    assert result.total_lines == 4
+
+
 def test_excluded_and_traversal_paths_are_rejected(tmp_path) -> None:
     private = tmp_path / "private"
     private.mkdir()
