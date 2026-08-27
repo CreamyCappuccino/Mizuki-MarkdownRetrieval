@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 from mcp.server import MCPServer
 from mcp.server.auth.provider import TokenVerifier
 from mcp.server.auth.settings import AuthSettings
+from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import AnyHttpUrl
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -23,6 +24,7 @@ class RemoteHttpSettings:
     host: str = "127.0.0.1"
     port: int = 4440
     mcp_path: str = "/mcp"
+    max_request_body_size: int = 65_536
 
     def __post_init__(self) -> None:
         if self.host not in {"127.0.0.1", "localhost", "::1"}:
@@ -33,6 +35,8 @@ class RemoteHttpSettings:
             raise ValueError("required_scope must not be blank")
         if not self.mcp_path.startswith("/"):
             raise ValueError("mcp_path must start with /")
+        if not 4_096 <= self.max_request_body_size <= 1_048_576:
+            raise ValueError("max_request_body_size must be between 4096 and 1048576")
 
         issuer = urlsplit(self.issuer_url)
         resource = urlsplit(self.resource_url)
@@ -40,8 +44,40 @@ class RemoteHttpSettings:
             raise ValueError("issuer_url must be an absolute https URL")
         if resource.scheme != "https" or not resource.netloc:
             raise ValueError("resource_url must be an absolute https URL")
+        if resource.username or resource.password:
+            raise ValueError("resource_url must not contain userinfo")
         if resource.path != self.mcp_path or resource.query or resource.fragment:
             raise ValueError("resource_url path must exactly match mcp_path")
+
+    @property
+    def public_hostname(self) -> str:
+        hostname = urlsplit(self.resource_url).hostname
+        if hostname is None:  # guarded by __post_init__
+            raise ValueError("resource_url must contain a hostname")
+        return hostname
+
+    def transport_security(self) -> TransportSecuritySettings:
+        public = self.public_hostname
+        return TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=[
+                "127.0.0.1",
+                "127.0.0.1:*",
+                "localhost",
+                "localhost:*",
+                "[::1]",
+                "[::1]:*",
+                public,
+                f"{public}:*",
+            ],
+            allowed_origins=[
+                "http://127.0.0.1:*",
+                "http://localhost:*",
+                "http://[::1]:*",
+                f"https://{public}",
+                f"https://{public}:*",
+            ],
+        )
 
 
 def build_http_server(
@@ -107,4 +143,6 @@ def run_http_server(
         streamable_http_path=settings.mcp_path,
         stateless_http=True,
         json_response=True,
+        max_request_body_size=settings.max_request_body_size,
+        transport_security=settings.transport_security(),
     )
