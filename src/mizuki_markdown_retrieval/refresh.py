@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .chunking import chunk_markdown
+from .chunking import chunk_markdown, resolve_profile
 from .config import ScopeConfig
 from .discovery import discover_markdown
 from .indexing import IndexPlan, plan_index_updates
@@ -16,6 +16,7 @@ class RefreshPlan:
     state_path: Path
     index_plan: IndexPlan
     discovered_count: int
+    representation_revision: str
 
     @property
     def changed_count(self) -> int:
@@ -45,18 +46,30 @@ def prepare_refresh(
     if wrong_namespace:
         raise ValueError("index state belongs to another namespace")
 
+    profile = resolve_profile(chunk_profile)
+    representation_revision = (
+        "markdown-chunker-v1:"
+        f"{profile.name}:"
+        f"{profile.target_chars}:"
+        f"{profile.soft_chars}:"
+        f"{profile.hard_chars}:"
+        f"{profile.overlap_chars}"
+    )
+
     indexed_files = discover_markdown(scope)
     index_plan = plan_index_updates(
         indexed_files,
         previous,
         full_reindex_threshold=full_reindex_threshold,
-        chunker=lambda indexed_file: chunk_markdown(indexed_file, profile=chunk_profile),
+        representation_revision=representation_revision,
+        chunker=lambda indexed_file: chunk_markdown(indexed_file, profile=profile),
     )
     return RefreshPlan(
         namespace=scope.namespace,
         state_path=state_path,
         index_plan=index_plan,
         discovered_count=len(indexed_files),
+        representation_revision=representation_revision,
     )
 
 
