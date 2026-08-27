@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from types import SimpleNamespace
 
 import jwt
@@ -12,7 +13,7 @@ from mizuki_markdown_retrieval.remote_auth import RemoteOAuthConfig, SharedOAuth
 
 ISSUER = "https://oauth.example.test"
 RESOURCE = "https://mdr.example.test/mcp"
-NOW = 2_000_000_000
+NOW = int(time.time())
 
 
 class StaticJWKClient:
@@ -66,7 +67,7 @@ def _token(private_key, *, claims=None, headers=None, algorithm="RS256") -> str:
         claims = _claims()
     if headers is None:
         headers = {"typ": "at+jwt", "kid": "key-1"}
-    key = private_key if algorithm == "RS256" else "test-secret"
+    key = private_key if algorithm == "RS256" else "x" * 32
     return jwt.encode(claims, key, algorithm=algorithm, headers=headers)
 
 
