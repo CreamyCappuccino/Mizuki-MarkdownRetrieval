@@ -57,7 +57,7 @@ def chunk_markdown(
         pieces.extend(_split_section(section, resolved))
 
     chunks: list[MarkdownChunk] = []
-    for index, piece in enumerate(pieces, start=1):
+    for ordinal, piece in enumerate(pieces):
         content = "".join(line.text for line in piece.lines).strip()
         if not content:
             continue
@@ -66,7 +66,8 @@ def chunk_markdown(
                 namespace=indexed_file.document.namespace,
                 document_id=indexed_file.document.document_id,
                 source_version=indexed_file.document.source_version,
-                chunk_id=f"c{index:06d}",
+                chunk_id=f"c{ordinal + 1:06d}",
+                ordinal=ordinal,
                 content=content,
                 content_hash=sha256_text(content),
                 relative_path=indexed_file.document.relative_path,
