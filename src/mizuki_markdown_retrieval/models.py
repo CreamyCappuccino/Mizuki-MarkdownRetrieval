@@ -27,6 +27,7 @@ class MarkdownChunk:
     document_id: str
     source_version: str
     chunk_id: str
+    ordinal: int
     content: str
     content_hash: str
     relative_path: str
@@ -34,6 +35,10 @@ class MarkdownChunk:
     line_start: int
     line_end: int
     metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.ordinal < 0:
+            raise ValueError("ordinal must be zero or greater")
 
     @property
     def self_identity(self) -> tuple[str, str, str, str]:
