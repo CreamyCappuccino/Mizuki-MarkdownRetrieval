@@ -6,13 +6,13 @@ Markdown retrieval adapter for SearchE and the shared Retrieval Toolkit.
 
 Reduce the cognitive and token cost of working with Markdown projects whose rules, routines, exceptions, and operational notes are spread across multiple files.
 
-The adapter discovers configured Markdown scopes, preserves heading/line provenance, plans incremental index updates, and maps Markdown chunks into the shared Retrieval Toolkit contract. Search and ranking stay outside this repository.
+The adapter discovers configured Markdown scopes, preserves heading/line provenance, plans incremental index updates, maps Markdown chunks into the shared Retrieval Toolkit contract, and exposes bounded read/search entry points. Search ranking itself stays in SearchE and the shared Toolkit.
 
 ## Responsibility boundary
 
 - **SearchE core**: ANN / SQL LIKE / hybrid search and ranking.
-- **Retrieval Toolkit**: reusable retrieval operators, persistent apply contracts, and pipeline composition shared across adapters.
-- **Mizuki-MarkdownRetrieval**: Markdown collection, heading-aware chunking, file/chunk freshness, folder scope, Toolkit mapping, local state, CLI/MCP wiring.
+- **Retrieval Toolkit**: reusable retrieval operators, persistent apply contracts, provider interfaces, and pipeline composition shared across adapters.
+- **Mizuki-MarkdownRetrieval**: Markdown collection, heading-aware chunking, file/chunk freshness, folder scope, Toolkit mapping, local state, source resolution, bounded reads, and CLI/MCP wiring.
 
 Markdown-specific knowledge stays in this adapter. Generic retrieval behavior belongs in the shared Toolkit rather than being reimplemented here.
 
@@ -56,13 +56,15 @@ The v0 collaboration contract is documented in `docs/retrieval_contract_and_mm30
   - embed changed chunks.
 - Provider apply occurs before local snapshot commit; provider failure leaves local state untouched.
 - Provider-agnostic `related_for_chunk()` runtime helper for `changed_chunk_related` search from a durable index.
+- Current source-chunk resolution by either human-friendly `path + line` or machine-friendly `document_id + chunk_id`.
+- Bounded `hit / around / full` Markdown read views with scope/include/exclude/symlink enforcement and explicit `max_chars` truncation.
 - TOML project configuration with multiple named scopes.
-- Read-only CLI commands: `validate`, `discover`, `plan`.
+- Read-only CLI commands: `validate`, `discover`, `plan`, `read`, `search`.
 - GitHub Actions pytest CI.
 
 The Markdown boundary has been independently tested against the shared Retrieval Toolkit v0 implementation, including self-exclusion, document grouping, metadata round-trip, fail-closed namespace filtering, atomic persistent apply, durable reopen, and related-document search.
 
-`tests/test_cross_repo_sqlite_e2e.py` is an optional real integration test. It runs when the shared `retrieval_toolkit`/SearchE package is available on `PYTHONPATH`; the public standalone CI skips it rather than requiring access to a separate private repository.
+`tests/test_cross_repo_sqlite_e2e.py` is an optional real integration test. It runs when the shared `retrieval_toolkit`/SearchE package is available on `PYTHONPATH`; the public standalone CI skips it rather than requiring access to a separate private repository. The shared SearchE environment has also executed this test without the skip and passed the full cross-repository flow.
 
 ## Local/private material
 
@@ -109,13 +111,59 @@ mizuki-mdr --config markdown-retrieval.toml plan rules
 
 `plan` is intentionally read-only. It does **not** advance persisted state. Integration code should call the shared persistent provider first and commit local state only after the provider reports successful durable application.
 
-Programmatic integrations can use `apply_refresh()` for the atomic apply-before-state sequence and `related_for_chunk()` to query the durable index for documents related to a changed Markdown chunk.
+### Bounded reads
+
+Read just a hit, nearby context, or an explicitly bounded full file through the same configured scope boundary:
+
+```bash
+mizuki-mdr --config markdown-retrieval.toml read rules strategies/entry.md \
+  --view hit --line-start 40 --line-end 48
+
+mizuki-mdr --config markdown-retrieval.toml read rules strategies/entry.md \
+  --view around --line-start 40 --line-end 48 --context-lines 12
+
+mizuki-mdr --config markdown-retrieval.toml read rules strategies/entry.md \
+  --view full --max-chars 50000
+```
+
+### Related-document search
+
+`search` reads an **existing durable SQLite index** produced through the shared Retrieval Toolkit provider. The command itself is read-only.
+
+Human-friendly source selection uses a current Markdown path and one-based line:
+
+```bash
+mizuki-mdr --config markdown-retrieval.toml search rules \
+  --database local/rules.sqlite3 \
+  --representation-revision ruri-v3-310m-v1 \
+  --mode semantic \
+  --model-path /path/to/ruri-v3-310m \
+  --path strategies/entry.md \
+  --line 44 \
+  --top-k 5
+```
+
+Machine callers can select the same current chunk by identity:
+
+```bash
+mizuki-mdr --config markdown-retrieval.toml search rules \
+  --database local/rules.sqlite3 \
+  --representation-revision ruri-v3-310m-v1 \
+  --mode semantic \
+  --model-path /path/to/ruri-v3-310m \
+  --document-id <document-id> \
+  --chunk-id <chunk-id> \
+  --json
+```
+
+Modes are `semantic`, `literal`, and `hybrid`. Semantic/hybrid search requires the SearchE Ruri embedding runtime and an explicit `--model-path`; literal search does not load an embedding model. The representation revision must match the durable index that is being opened.
+
+Programmatic integrations can use `apply_refresh()` for the atomic apply-before-state sequence, `related_for_chunk()` for related-document retrieval, and `read_markdown_view()` for bounded source reads.
 
 ## Not implemented yet
 
 - A persistent SearchE provider bundled inside this repository. Persistent providers remain a shared SearchE/Toolkit responsibility and are injected at integration time.
-- Search CLI surface for semantic/literal/hybrid queries.
-- Bounded `hit / around / full` read interface.
+- CLI command that mutates/builds the durable SearchE index; current CLI search is intentionally read-only.
 - MCP server surface.
 - File watching / automatic refresh loop.
 - Optional later GraphRAG operators.
