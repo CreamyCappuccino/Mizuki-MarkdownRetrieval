@@ -12,6 +12,7 @@ from .indexing import (
 )
 from .models import DocumentRef, IndexedMarkdownFile, MarkdownChunk
 from .refresh import RefreshPlan, apply_refresh, commit_refresh_state, prepare_refresh
+from .runtime import related_for_chunk
 from .state_store import StateFormatError, load_state, save_state
 from .toolkit_bridge import (
     ToolkitUnavailableError,
@@ -48,6 +49,7 @@ __all__ = [
     "make_source_query",
     "plan_index_updates",
     "prepare_refresh",
+    "related_for_chunk",
     "resolve_toolkit",
     "save_state",
     "to_toolkit_chunk",
