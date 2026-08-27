@@ -28,6 +28,14 @@ Annotations remain client hints, not authorization enforcement.
 
 For Streamable HTTP, the MCP process is an OAuth 2.1 **resource server**. It verifies bearer tokens and advertises protected-resource metadata; it does not become the login/consent/token issuer merely because the transport changed.
 
+### Existing shared OAuth authority
+
+This project must reuse the existing shared OAuth / Authorization Server already operated for Ushio's MCP environment. The established architecture places that shared authorization authority on Cloudflare Workers while individual MCP services act as resource servers validating its tokens. **Do not create a new authorization server inside this repository.**
+
+If Markdown Retrieval needs a dedicated resource/client registration, scope entry, audience, or related shared-OAuth provisioning, follow the existing MCPMemory route anchored at **Mizuki MM255** and coordinate with the owning Mizuki/session there. Treat that route as infrastructure ownership, not as permission to duplicate OAuth implementation here.
+
+Until the shared-OAuth registration details are obtained, keep the public endpoint disabled. Stable configuration that may eventually be supplied by that infrastructure includes the canonical issuer, exact resource audience/URL, accepted scopes, and any client-registration requirements. Secrets remain external to this public repository.
+
 Use the current MCP Python SDK v2 resource-server integration:
 
 - `MCPServer(..., token_verifier=..., auth=AuthSettings(...))`
