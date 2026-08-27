@@ -14,6 +14,7 @@ from starlette.responses import JSONResponse
 
 from .mcp_readiness import check_readiness
 from .mcp_server import build_server
+from .remote_auth import RemoteOAuthConfig, SharedOAuthJWTVerifier
 
 
 @dataclass(frozen=True)
@@ -42,12 +43,34 @@ class RemoteHttpSettings:
         resource = urlsplit(self.resource_url)
         if issuer.scheme != "https" or not issuer.netloc:
             raise ValueError("issuer_url must be an absolute https URL")
+        if issuer.username or issuer.password or issuer.query or issuer.fragment:
+            raise ValueError("issuer_url must not contain userinfo, query, or fragment")
         if resource.scheme != "https" or not resource.netloc:
             raise ValueError("resource_url must be an absolute https URL")
         if resource.username or resource.password:
             raise ValueError("resource_url must not contain userinfo")
         if resource.path != self.mcp_path or resource.query or resource.fragment:
             raise ValueError("resource_url path must exactly match mcp_path")
+
+    @classmethod
+    def from_oauth_config(
+        cls,
+        oauth: RemoteOAuthConfig,
+        *,
+        host: str = "127.0.0.1",
+        port: int = 4440,
+        max_request_body_size: int = 65_536,
+    ) -> "RemoteHttpSettings":
+        resource_path = urlsplit(oauth.resource).path
+        return cls(
+            issuer_url=oauth.issuer,
+            resource_url=oauth.resource,
+            required_scope=oauth.required_scope,
+            host=host,
+            port=port,
+            mcp_path=resource_path,
+            max_request_body_size=max_request_body_size,
+        )
 
     @property
     def public_hostname(self) -> str:
@@ -119,6 +142,41 @@ def build_http_server(
         )
 
     return server
+
+
+def build_shared_oauth_http_server(
+    config_path: str | Path,
+    *,
+    oauth: RemoteOAuthConfig,
+    host: str = "127.0.0.1",
+    port: int = 4440,
+    max_request_body_size: int = 65_536,
+    jwk_client=None,
+    toolkit=None,
+) -> tuple[MCPServer, RemoteHttpSettings]:
+    """Build the production-shaped local RS from one authoritative OAuth config.
+
+    The verifier and advertised MCP authorization metadata are derived from the
+    same immutable config so issuer/resource/scope cannot silently diverge.
+    External Shared OAuth registration is still a separate publication step.
+    """
+
+    settings = RemoteHttpSettings.from_oauth_config(
+        oauth,
+        host=host,
+        port=port,
+        max_request_body_size=max_request_body_size,
+    )
+    verifier = SharedOAuthJWTVerifier(oauth, jwk_client=jwk_client)
+    return (
+        build_http_server(
+            config_path,
+            token_verifier=verifier,
+            settings=settings,
+            toolkit=toolkit,
+        ),
+        settings,
+    )
 
 
 def run_http_server(
