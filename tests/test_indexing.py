@@ -90,3 +90,41 @@ def test_removed_file_is_reported_as_deleted(tmp_path: Path) -> None:
     assert update.source_version is None
     assert update.remove_previous_version is True
     assert update.removed_content_hashes
+
+
+def test_provider_revision_change_forces_fresh_full_reindex(tmp_path: Path) -> None:
+    note = tmp_path / "rules.md"
+    note.write_text("# A\none\n\n# B\ntwo\n", encoding="utf-8")
+    first = plan_index_updates(_discover(tmp_path), provider_revision="provider-v1")
+
+    second = plan_index_updates(
+        _discover(tmp_path),
+        first.snapshots,
+        provider_revision="provider-v2",
+    )
+    update = second.updates[0]
+
+    assert update.kind == "full_reindex"
+    assert len(update.upsert_chunks) == 2
+    assert update.embed_chunks == update.upsert_chunks
+    assert update.reused_chunks == ()
+    assert update.remove_previous_version is True
+    assert next(iter(second.snapshots.values())).provider_revision == "provider-v2"
+
+
+def test_force_full_reindex_reembeds_all_current_chunks(tmp_path: Path) -> None:
+    note = tmp_path / "rules.md"
+    note.write_text("# A\none\n", encoding="utf-8")
+    first = plan_index_updates(_discover(tmp_path), provider_revision="provider-v1")
+
+    second = plan_index_updates(
+        _discover(tmp_path),
+        first.snapshots,
+        provider_revision="provider-v1",
+        force_full_reindex=True,
+    )
+
+    update = second.updates[0]
+    assert update.kind == "full_reindex"
+    assert update.embed_chunks == update.upsert_chunks
+    assert update.reused_chunks == ()
