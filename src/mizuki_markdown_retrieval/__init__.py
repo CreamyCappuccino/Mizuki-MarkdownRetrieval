@@ -14,6 +14,7 @@ from .models import DocumentRef, IndexedMarkdownFile, MarkdownChunk
 from .reading import ReadViewResult, ScopedReadError, read_markdown_view
 from .refresh import RefreshPlan, apply_refresh, commit_refresh_state, prepare_refresh
 from .runtime import related_for_chunk
+from .source_resolver import SourceChunkNotFoundError, resolve_source_chunk
 from .state_store import StateFormatError, load_state, save_state
 from .toolkit_bridge import (
     ToolkitUnavailableError,
@@ -40,6 +41,7 @@ __all__ = [
     "ScopeConfig",
     "ScopeMode",
     "ScopedReadError",
+    "SourceChunkNotFoundError",
     "StateFormatError",
     "ToolkitUnavailableError",
     "apply_refresh",
@@ -54,6 +56,7 @@ __all__ = [
     "prepare_refresh",
     "read_markdown_view",
     "related_for_chunk",
+    "resolve_source_chunk",
     "resolve_toolkit",
     "save_state",
     "to_toolkit_chunk",
