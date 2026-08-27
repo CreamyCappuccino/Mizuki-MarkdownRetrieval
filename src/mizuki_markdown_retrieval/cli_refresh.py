@@ -5,7 +5,7 @@ from typing import Any
 
 from .project_config import ProjectConfigError, RuntimeScope
 from .refresh import apply_refresh, prepare_refresh
-from .sqlite_runtime import open_sqlite_apply_provider
+from .sqlite_runtime import open_sqlite_apply_provider, sqlite_index_matches_snapshots
 
 
 def run_refresh_command(
@@ -29,7 +29,24 @@ def run_refresh_command(
         runtime.state_path,
         full_reindex_threshold=runtime.full_reindex_threshold,
         chunk_profile=runtime.chunk_profile,
+        provider_revision=search.representation_revision,
     )
+
+    if not refresh.changed_count and not sqlite_index_matches_snapshots(
+        search.database_path,
+        namespace=refresh.namespace,
+        representation_revision=search.representation_revision,
+        snapshots=refresh.index_plan.snapshots,
+        toolkit=toolkit,
+    ):
+        refresh = prepare_refresh(
+            runtime.scope,
+            runtime.state_path,
+            full_reindex_threshold=runtime.full_reindex_threshold,
+            chunk_profile=runtime.chunk_profile,
+            provider_revision=search.representation_revision,
+            force_full_reindex=True,
+        )
 
     provider = None
     if refresh.changed_count:
