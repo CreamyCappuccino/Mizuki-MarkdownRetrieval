@@ -62,9 +62,7 @@ def test_mcp_read_schema_requires_explicit_view_and_describes_line_intent(tmp_pa
     assert "view" in read.input_schema["required"]
     assert props["view"]["enum"] == ["hit", "around", "full"]
     assert "hit/around require line_start" in props["view"]["description"]
-    assert "Required for hit/around" in props["line_start"]["anyOf"][0]["description"] or (
-        "Required for hit/around" in props["line_start"].get("description", "")
-    )
+    assert "Required for hit/around" in props["line_start"]["description"]
 
 
 def test_mcp_read_tool_safe_call_returns_compact_text_and_structured_content(tmp_path: Path) -> None:
