@@ -7,7 +7,7 @@ from pathlib import Path
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mizuki-mdr",
-        description="Plan and inspect Markdown retrieval scopes.",
+        description="Plan, refresh, and inspect Markdown retrieval scopes.",
     )
     parser.add_argument(
         "--config",
@@ -25,6 +25,13 @@ def build_parser() -> argparse.ArgumentParser:
     plan = subparsers.add_parser("plan", help="compute an incremental refresh plan")
     plan.add_argument("scope", help="scope name from config")
     plan.add_argument("--json", action="store_true")
+
+    refresh = subparsers.add_parser(
+        "refresh",
+        help="apply a durable SQLite index refresh for one configured scope",
+    )
+    refresh.add_argument("scope", help="scope name from config")
+    refresh.add_argument("--json", action="store_true")
 
     read = subparsers.add_parser("read", help="read a configured Markdown file safely")
     read.add_argument("scope", help="scope name from config")
