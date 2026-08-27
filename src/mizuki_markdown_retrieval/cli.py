@@ -6,6 +6,7 @@ from typing import Sequence
 
 from .cli_output import plan_payload, print_search_payload, search_payload
 from .cli_parser import build_parser, resolve_cli_path, validate_search_selector
+from .cli_refresh import run_refresh_command
 from .discovery import discover_markdown
 from .project_config import load_project_config
 from .reading import read_markdown_view
@@ -71,6 +72,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             print("state not committed (plan is read-only)")
         return 0
+
+    if args.command == "refresh":
+        return run_refresh_command(runtime, json_output=args.json)
 
     if args.command == "read":
         result = read_markdown_view(
