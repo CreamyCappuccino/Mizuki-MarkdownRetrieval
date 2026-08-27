@@ -38,3 +38,33 @@ def test_unknown_schema_fails_closed(tmp_path: Path) -> None:
 
     with pytest.raises(StateFormatError):
         load_state(state_path)
+
+
+def test_schema_v3_loads_with_legacy_provider_revision_for_safe_reindex(tmp_path: Path) -> None:
+    state_path = tmp_path / "state-v3.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 3,
+                "documents": [
+                    {
+                        "namespace": "demo",
+                        "document_id": "doc-1",
+                        "source_version": "v1",
+                        "file_hash": "hash-1",
+                        "relative_path": "rules.md",
+                        "representation_revision": "markdown-v1",
+                        "chunks": [
+                            {"chunk_id": "c1", "ordinal": 0, "content_hash": "h1"}
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = load_state(state_path)
+    snapshot = loaded["doc-1"]
+    assert snapshot.representation_revision == "markdown-v1"
+    assert snapshot.provider_revision == "legacy-provider-v3"
