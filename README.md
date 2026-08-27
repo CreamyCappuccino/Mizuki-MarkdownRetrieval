@@ -1,54 +1,44 @@
-# Mizuki-MarkdownRetrieval
+# Mizuki Markdown Retrieval
 
-Markdown retrieval adapter for SearchE and the shared Retrieval Toolkit.
+A small Markdown retrieval adapter that keeps Markdown-specific concerns separate from SearchE and the shared Retrieval Toolkit.
 
-## Goal
+The initial use case is update-miss detection across project Markdown files: when one rule or description changes, find other documents that likely contain related wording or semantics without loading the entire Markdown corpus into an LLM context.
 
-Reduce the cognitive and token cost of working with Markdown projects whose rules, routines, exceptions, and operational notes are spread across multiple files.
-
-The adapter discovers configured Markdown scopes, preserves heading/line provenance, plans incremental index updates, maps Markdown chunks into the shared Retrieval Toolkit contract, and exposes bounded read/search entry points. Search ranking itself stays in SearchE and the shared Toolkit.
-
-## Responsibility boundary
-
-- **SearchE core**: ANN / SQL LIKE / hybrid search and ranking.
-- **Retrieval Toolkit**: reusable retrieval operators, persistent apply contracts, provider interfaces, and pipeline composition shared across adapters.
-- **Mizuki-MarkdownRetrieval**: Markdown collection, heading-aware chunking, file/chunk freshness, folder scope, Toolkit mapping, local state, source resolution, bounded reads, and CLI/MCP wiring.
-
-Markdown-specific knowledge stays in this adapter. Generic retrieval behavior belongs in the shared Toolkit rather than being reimplemented here.
-
-## First vertical slice
+## Architecture
 
 ```text
-changed Markdown chunk
-  -> similar_to_chunk
-  -> scope_filter
-  -> exclude_self
-  -> group_by_document
-  -> top_k documents
-  -> show possible related/update-missed passages
+Markdown files
+  -> scoped discovery
+  -> heading-aware chunking
+  -> incremental index planning
+  -> Markdown -> Retrieval Toolkit boundary mapping
+  -> atomic persistent apply via shared Toolkit/SearchE provider
+  -> related-document retrieval
+  -> bounded source reads
 ```
 
-The v0 collaboration contract is documented in `docs/retrieval_contract_and_mm307_vertical_slice.md`.
+The repository owns Markdown-specific work:
 
-## Implemented
+- folder inclusion/exclusion and recursive inheritance,
+- Markdown discovery,
+- heading/line metadata,
+- chunking,
+- source-version and content-hash change planning,
+- local snapshot state,
+- conversion into generic Retrieval Toolkit contracts.
 
-- `include_all_except` and `include_only` folder modes.
-- Optional recursive child-folder inheritance with overrides.
-- Root/symlink boundary checks.
-- Stable document identity from namespace + relative path.
-- SHA-256 file versions and content hashes.
-- Heading-aware chunks with `path`, heading ancestry, and line ranges.
-- Configurable small/medium/large chunk profiles.
-- Retrieval Toolkit v0 boundary mapping (`DocumentRef`, `Chunk`, `RetrievalQuery`).
-- Incremental index planning:
-  - unchanged file -> skip chunking,
-  - changed file -> re-chunk once,
-  - unchanged chunk content -> embedding may be reused,
-  - changed/new content -> embedding work required,
-  - >50% changed by default -> full re-embed,
-  - old document version removal is explicit.
-- Representation-aware refresh: a chunk-profile/chunker revision change forces reindex even when Markdown bytes are unchanged.
-- Atomic JSON index-state persistence with schema migration.
+The shared Retrieval Toolkit/SearchE side owns generic retrieval operators and persistent provider behavior.
+
+## Current status
+
+Implemented:
+
+- Version-scoped chunk identity with stable `document_id`, `source_version`, `chunk_id`, and zero-based `ordinal`.
+- Heading-aware Markdown chunking with path, heading ancestry, line ranges, content hashes, and chunk profile metadata.
+- Recursive folder policy with `include_all_except` and `include_only`, plus child overrides.
+- Incremental file/chunk change planning.
+- Persisted index state with namespace and representation revision tracking.
+- Representation-aware refresh: chunk-profile/chunker changes trigger safe reindex even when Markdown bytes are unchanged.
 - Generic atomic persistent apply mapping:
   - remove old version,
   - upsert the exact current version,
@@ -60,6 +50,7 @@ The v0 collaboration contract is documented in `docs/retrieval_contract_and_mm30
 - Bounded `hit / around / full` Markdown read views with scope/include/exclude/symlink enforcement and explicit `max_chars` truncation.
 - TOML project configuration with multiple named scopes.
 - Read-only CLI commands: `validate`, `discover`, `plan`, `read`, `search`.
+- Local read-only MCP v2 server with explicit safety annotations and bounded tool schemas.
 - GitHub Actions pytest CI.
 
 The Markdown boundary has been independently tested against the shared Retrieval Toolkit v0 implementation, including self-exclusion, document grouping, metadata round-trip, fail-closed namespace filtering, atomic persistent apply, durable reopen, and related-document search.
@@ -98,6 +89,18 @@ inherit = true
 mode = "include_only"
 include = ["approved.md", "**/approved.md"]
 ```
+
+For the read-only MCP/search runtime, pin the durable index and representation details inside the scope instead of accepting arbitrary database/model paths from tool callers:
+
+```toml
+[scope.search]
+database_path = "local/rules.sqlite3"
+representation_revision = "ruri-v3-310m-v1"
+model_path = "/path/to/ruri-v3-310m"
+device = "cpu"
+```
+
+`model_path` may be omitted when only literal search is needed.
 
 ## CLI
 
@@ -160,11 +163,30 @@ Modes are `semantic`, `literal`, and `hybrid`. Semantic/hybrid search requires t
 
 Programmatic integrations can use `apply_refresh()` for the atomic apply-before-state sequence, `related_for_chunk()` for related-document retrieval, and `read_markdown_view()` for bounded source reads.
 
+## MCP server
+
+The first MCP surface is intentionally **local and read-only**. Install the MCP extra and run it over stdio:
+
+```bash
+python -m pip install -e '.[mcp]'
+mizuki-mdr-mcp --config markdown-retrieval.toml
+```
+
+Exposed tools:
+
+- `list_markdown_scopes` — bounded scope inventory without filesystem/database secrets.
+- `list_markdown_files` — bounded file paths inside one configured scope.
+- `search_related_markdown` — `semantic | literal | hybrid` related-document search from `path+line` or `document_id+chunk_id`.
+- `read_markdown` — bounded `hit | around | full` source reads.
+
+All four tools explicitly advertise `readOnlyHint=true`, `destructiveHint=false`, `idempotentHint=true`, and `openWorldHint=false`. Those annotations are client hints only; safety is also enforced in server-side scope/path validation and by opening the durable SQLite provider in true read-only mode.
+
+The MCP server does **not** expose arbitrary filesystem roots, database paths, model paths, or provider revisions as tool inputs. Those are fixed in the TOML scope configuration. The initial server supports stdio only. Public Streamable HTTP/OAuth publication remains a separate acceptance phase and should not be enabled until authentication, resource/audience checks, descriptor validation, and real-client tests are complete.
+
 ## Not implemented yet
 
 - A persistent SearchE provider bundled inside this repository. Persistent providers remain a shared SearchE/Toolkit responsibility and are injected at integration time.
 - CLI command that mutates/builds the durable SearchE index; current CLI search is intentionally read-only.
-- MCP server surface.
 - File watching / automatic refresh loop.
 - Optional later GraphRAG operators.
 
