@@ -9,7 +9,7 @@ from mizuki_markdown_retrieval.cli import main
 def _config(tmp_path: Path) -> Path:
     docs = tmp_path / "docs"
     docs.mkdir()
-    (docs / "rules.md").write_text("# Rules\none\n", encoding="utf-8")
+    (docs / "rules.md").write_text("# Rules\none\ntwo\nthree\n", encoding="utf-8")
     config = tmp_path / "markdown-retrieval.toml"
     config.write_text(
         """
@@ -46,3 +46,47 @@ def test_cli_discover_lists_relative_paths(tmp_path: Path, capsys) -> None:
     output = capsys.readouterr().out
     assert "rules.md" in output
     assert "files=1" in output
+
+
+def test_cli_read_around_json(tmp_path: Path, capsys) -> None:
+    config = _config(tmp_path)
+
+    assert (
+        main(
+            [
+                "--config",
+                str(config),
+                "read",
+                "demo",
+                "rules.md",
+                "--view",
+                "around",
+                "--line-start",
+                "3",
+                "--line-end",
+                "3",
+                "--context-lines",
+                "1",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["scope"] == "demo"
+    assert payload["path"] == "rules.md"
+    assert payload["view"] == "around"
+    assert payload["line_start"] == 2
+    assert payload["line_end"] == 4
+    assert payload["text"] == "one\ntwo\nthree\n"
+    assert payload["truncated"] is False
+
+
+def test_cli_read_full_plain(tmp_path: Path, capsys) -> None:
+    config = _config(tmp_path)
+
+    assert main(["--config", str(config), "read", "demo", "rules.md", "--view", "full"]) == 0
+    output = capsys.readouterr().out
+    assert "view=full" in output
+    assert "# Rules" in output
+    assert "three" in output
