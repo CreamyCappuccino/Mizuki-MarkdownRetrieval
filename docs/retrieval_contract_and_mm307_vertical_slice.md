@@ -2,7 +2,7 @@
 
 Status: **Initial design / collaboration contract draft**  
 Repository: `CreamyCappuccino/Mizuki-MarkdownRetrieval`  
-Context anchors: **Mizuki MM307**, **Mizuki MM308**, **Codex MM75**
+Context anchors: **Mizuki MM307**, **Mizuki MM308**, **Mizuki KL51**, **Mizuki MM311**, **Codex MM75**
 
 ## 1. Why this repository exists
 
@@ -123,6 +123,7 @@ Required concepts:
 document_id      stable adapter-scoped identifier
 source_uri       opaque source locator (file URI or normalized path)
 namespace        configured retrieval scope
+source_version   opaque version/freshness token for the indexed document snapshot
 metadata         opaque adapter metadata
 ```
 
@@ -133,7 +134,7 @@ For Markdown, `metadata` may include path-related information, but the Toolkit m
 One searchable unit.
 
 ```text
-chunk_id         stable enough for one indexed document version
+chunk_id         identity for one chunk record within an indexed document version
 document_ref     owning DocumentRef
 content          searchable text
 content_hash     hash of normalized chunk content
@@ -151,6 +152,19 @@ section_depth
 ```
 
 The Toolkit transports these fields but does not need to know what a heading means.
+
+#### 4.2.1 Chunk identity across document updates
+
+`chunk_id` is deliberately **version-scoped**, not a promise of permanent identity across document rewrites. A result may use `chunk_id` for bounded follow-up reads while its `DocumentRef.source_version` is current.
+
+Cross-version behavior is separated into distinct concepts:
+
+- `content_hash` answers whether normalized chunk content is unchanged and may therefore reuse an existing indexed/embedded representation;
+- `chunk_id` identifies the chunk record in the current indexed document version;
+- line numbers are presentation metadata, never identity;
+- if future features require tracking a logical passage across rewrites, introduce a separate `logical_locator`, lineage relation, or `previous_chunk_id`-style field rather than overloading `chunk_id`.
+
+An implementation may preserve a physical/internal chunk record when an unchanged `content_hash` is safely reused, but callers and Toolkit operators must not depend on `chunk_id` remaining identical after a document version changes. This keeps re-chunking and large rewrites safe while still allowing cheap reuse of unchanged embeddings.
 
 ### 4.3 `RetrievalQuery`
 
@@ -175,24 +189,28 @@ A search candidate before or during operator processing.
 
 ```text
 chunk
-score
-score components / evidence flags
-retrieval mode
-metadata passthrough
+score?            optional normalized/overall score when the provider exposes one
+retrieval_mode
+evidence[]
+metadata           opaque passthrough
 ```
+
+The common contract must not require a particular SearchE-era score decomposition.
 
 ### 4.5 `Evidence`
 
-Machine-readable reason a candidate was surfaced where available.
+`Evidence` is intentionally minimal so adapters do not freeze themselves to one SearchE implementation. It records a mechanical reason a candidate was surfaced, without requiring every backend to expose the same internal scores.
 
-Examples:
+Minimum conceptual shape:
 
 ```text
-semantic score
-literal match terms
-hybrid contribution
-source operator
+kind              semantic | literal | hybrid | operator | other
+source_operator   operator/provider that produced the evidence
+score?            optional numeric score
+details?          optional opaque machine-readable metadata
 ```
+
+Backend-specific fields such as ANN similarity, literal matched terms, exact-match flags, fusion rank, or component scores may be carried inside `details`, but they are **not guaranteed fields of the shared contract**.
 
 This should remain mechanical. The adapter does not need an LLM-generated explanation for every hit.
 
