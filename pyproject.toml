@@ -13,10 +13,12 @@ authors = [{ name = "Mizuki / CreamyCappuccino" }]
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "mcp>=2,<3"]
+mcp = ["mcp>=2,<3"]
 
 [project.scripts]
 mizuki-mdr = "mizuki_markdown_retrieval.cli:main"
+mizuki-mdr-mcp = "mizuki_markdown_retrieval.mcp_server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
