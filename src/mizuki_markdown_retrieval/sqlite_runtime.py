@@ -1,14 +1,25 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from importlib import import_module
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from .toolkit_bridge import resolve_toolkit
 
 
 class SearchRuntimeUnavailableError(RuntimeError):
     pass
+
+
+DurableIndexStatus = Literal["match", "missing", "mismatch"]
+
+
+@dataclass(frozen=True)
+class DurableIndexPreflight:
+    status: DurableIndexStatus
+    expected_chunks: int
+    actual_chunks: int
 
 
 class _LiteralOnlyEmbeddingProvider:
@@ -87,33 +98,23 @@ def open_sqlite_apply_provider(
     )
 
 
-def sqlite_index_matches_snapshots(
+def preflight_sqlite_index(
     database_path: str | Path,
     *,
     namespace: str,
     representation_revision: str,
     snapshots: Any,
     toolkit: Any | None = None,
-) -> bool:
-    """Check durable SQLite/index-state parity without loading an embedding model.
+) -> DurableIndexPreflight:
+    """Compare durable SQLite with committed state without loading a model.
 
-    A missing database or missing/incomplete namespace returns ``False`` so an
-    operational refresh can rebuild from source. Corrupt schema or a namespace
-    containing another representation revision remains fail-closed through the
-    shared SearchE provider.
+    ``missing`` is recoverable from source: either the database is absent or the
+    committed namespace has no durable chunks while state expects some.
+    ``mismatch`` means durable data exists but disagrees with committed state; the
+    operational caller should fail closed rather than guessing which side is
+    authoritative. Schema or representation-revision errors propagate unchanged.
     """
 
-    try:
-        provider = open_sqlite_search_provider(
-            database_path,
-            representation_revision=representation_revision,
-            mode="literal",
-            toolkit=toolkit,
-        )
-    except FileNotFoundError:
-        return False
-
-    loaded = provider.load_namespace(namespace)
     expected = {
         (
             snapshot.namespace,
@@ -126,6 +127,22 @@ def sqlite_index_matches_snapshots(
         for snapshot in snapshots.values()
         for chunk in snapshot.chunks
     }
+
+    try:
+        provider = open_sqlite_search_provider(
+            database_path,
+            representation_revision=representation_revision,
+            mode="literal",
+            toolkit=toolkit,
+        )
+    except FileNotFoundError:
+        return DurableIndexPreflight(
+            status="missing",
+            expected_chunks=len(expected),
+            actual_chunks=0,
+        )
+
+    loaded = provider.load_namespace(namespace)
     actual = {
         (
             chunk.document_ref.namespace,
@@ -137,7 +154,39 @@ def sqlite_index_matches_snapshots(
         )
         for chunk in loaded.chunks
     }
-    return actual == expected
+    if actual == expected:
+        status: DurableIndexStatus = "match"
+    elif expected and not actual:
+        status = "missing"
+    else:
+        status = "mismatch"
+    return DurableIndexPreflight(
+        status=status,
+        expected_chunks=len(expected),
+        actual_chunks=len(actual),
+    )
+
+
+def sqlite_index_matches_snapshots(
+    database_path: str | Path,
+    *,
+    namespace: str,
+    representation_revision: str,
+    snapshots: Any,
+    toolkit: Any | None = None,
+) -> bool:
+    """Compatibility wrapper for callers that only need a boolean parity check."""
+
+    return (
+        preflight_sqlite_index(
+            database_path,
+            namespace=namespace,
+            representation_revision=representation_revision,
+            snapshots=snapshots,
+            toolkit=toolkit,
+        ).status
+        == "match"
+    )
 
 
 def _load_ruri_embedding_provider(model_path: str | Path, *, device: str) -> Any:
