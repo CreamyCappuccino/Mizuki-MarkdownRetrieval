@@ -87,6 +87,59 @@ def open_sqlite_apply_provider(
     )
 
 
+def sqlite_index_matches_snapshots(
+    database_path: str | Path,
+    *,
+    namespace: str,
+    representation_revision: str,
+    snapshots: Any,
+    toolkit: Any | None = None,
+) -> bool:
+    """Check durable SQLite/index-state parity without loading an embedding model.
+
+    A missing database or missing/incomplete namespace returns ``False`` so an
+    operational refresh can rebuild from source. Corrupt schema or a namespace
+    containing another representation revision remains fail-closed through the
+    shared SearchE provider.
+    """
+
+    try:
+        provider = open_sqlite_search_provider(
+            database_path,
+            representation_revision=representation_revision,
+            mode="literal",
+            toolkit=toolkit,
+        )
+    except FileNotFoundError:
+        return False
+
+    loaded = provider.load_namespace(namespace)
+    expected = {
+        (
+            snapshot.namespace,
+            snapshot.document_id,
+            snapshot.source_version,
+            chunk.chunk_id,
+            chunk.content_hash,
+            chunk.ordinal,
+        )
+        for snapshot in snapshots.values()
+        for chunk in snapshot.chunks
+    }
+    actual = {
+        (
+            chunk.document_ref.namespace,
+            chunk.document_ref.document_id,
+            chunk.document_ref.source_version,
+            chunk.chunk_id,
+            chunk.content_hash,
+            chunk.ordinal,
+        )
+        for chunk in loaded.chunks
+    }
+    return actual == expected
+
+
 def _load_ruri_embedding_provider(model_path: str | Path, *, device: str) -> Any:
     try:
         module = import_module("searche.ruri_embeddings")
