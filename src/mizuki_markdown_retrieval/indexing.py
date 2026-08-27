@@ -25,6 +25,7 @@ class DocumentSnapshot:
     file_hash: str
     relative_path: str
     chunks: tuple[ChunkSnapshot, ...]
+    representation_revision: str = "legacy"
 
 
 @dataclass(frozen=True)
@@ -64,7 +65,11 @@ class IndexPlan:
 def build_snapshot(
     indexed_file: IndexedMarkdownFile,
     chunks: Sequence[MarkdownChunk],
+    *,
+    representation_revision: str = "legacy",
 ) -> DocumentSnapshot:
+    if not representation_revision.strip():
+        raise ValueError("representation_revision must not be blank")
     return DocumentSnapshot(
         namespace=indexed_file.document.namespace,
         document_id=indexed_file.document.document_id,
@@ -79,6 +84,7 @@ def build_snapshot(
             )
             for chunk in chunks
         ),
+        representation_revision=representation_revision,
     )
 
 
@@ -87,19 +93,23 @@ def plan_index_updates(
     previous: Mapping[str, DocumentSnapshot] | None = None,
     *,
     full_reindex_threshold: float = 0.5,
+    representation_revision: str = "legacy",
     chunker: Callable[[IndexedMarkdownFile], Sequence[MarkdownChunk]] = chunk_markdown,
 ) -> IndexPlan:
     """Plan incremental indexing without touching embeddings or a database.
 
-    Files whose hash is unchanged never call the chunker. Changed files are
-    re-chunked once. The current document version is always upserted as a whole;
-    unchanged chunk content may reuse an old embedding, while changed chunks need
-    fresh embedding work. If the changed share is greater than
+    Files whose bytes *and representation revision* are unchanged never call the
+    chunker. Changed files or changed chunker/profile revisions are re-chunked
+    once. The current document version is always upserted as a whole; unchanged
+    chunk content may reuse an old embedding, while changed chunks need fresh
+    embedding work. If the changed share is greater than
     `full_reindex_threshold`, every current chunk is re-embedded.
     """
 
     if not 0 <= full_reindex_threshold <= 1:
         raise ValueError("full_reindex_threshold must be between 0 and 1")
+    if not representation_revision.strip():
+        raise ValueError("representation_revision must not be blank")
 
     prior = dict(previous or {})
     current_ids: set[str] = set()
@@ -125,7 +135,11 @@ def plan_index_updates(
         current_ids.add(document_id)
         old = prior.get(document_id)
 
-        if old is not None and old.file_hash == indexed_file.file_hash:
+        if (
+            old is not None
+            and old.file_hash == indexed_file.file_hash
+            and old.representation_revision == representation_revision
+        ):
             snapshots[document_id] = old
             updates.append(
                 DocumentUpdate(
@@ -140,7 +154,11 @@ def plan_index_updates(
             continue
 
         chunks = tuple(chunker(indexed_file))
-        snapshot = build_snapshot(indexed_file, chunks)
+        snapshot = build_snapshot(
+            indexed_file,
+            chunks,
+            representation_revision=representation_revision,
+        )
         snapshots[document_id] = snapshot
 
         if old is None:
