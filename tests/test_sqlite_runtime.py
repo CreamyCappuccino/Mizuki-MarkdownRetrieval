@@ -12,10 +12,18 @@ from mizuki_markdown_retrieval.sqlite_runtime import (
 
 
 class FakeSQLiteIndexProvider:
-    def __init__(self, database_path, *, embedding_provider, representation_revision):
+    def __init__(
+        self,
+        database_path,
+        *,
+        embedding_provider,
+        representation_revision,
+        read_only=False,
+    ):
         self.database_path = database_path
         self.embedding_provider = embedding_provider
         self.representation_revision = representation_revision
+        self.read_only = read_only
 
 
 def test_literal_runtime_opens_without_embedding_model(tmp_path: Path) -> None:
@@ -29,6 +37,7 @@ def test_literal_runtime_opens_without_embedding_model(tmp_path: Path) -> None:
 
     assert provider.database_path == (tmp_path / "index.sqlite3").resolve()
     assert provider.representation_revision == "fixture-v1"
+    assert provider.read_only is True
     with pytest.raises(RuntimeError, match="literal-only"):
         provider.embedding_provider.embed_query("unused")
 
