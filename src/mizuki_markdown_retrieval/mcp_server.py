@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from mcp.server import MCPServer
-from mcp.types import ToolAnnotations
+from mcp.types import CallToolResult, ToolAnnotations
 from pydantic import Field
 
+from .mcp_output import format_files, format_read, format_scopes, format_search, tool_result
 from .mcp_service import ReadOnlyRetrievalService
 
 READ_ONLY_LOCAL = ToolAnnotations(
@@ -41,8 +42,9 @@ def build_server(config_path: str | Path) -> MCPServer:
     )
     def list_markdown_scopes(
         limit: Annotated[int, Field(ge=1, le=100)] = 50,
-    ) -> dict[str, Any]:
-        return service.list_scopes(limit=limit)
+    ) -> CallToolResult:
+        payload = service.list_scopes(limit=limit)
+        return tool_result(payload, format_scopes(payload))
 
     @mcp.tool(
         title="List Markdown files",
@@ -55,8 +57,9 @@ def build_server(config_path: str | Path) -> MCPServer:
     def list_markdown_files(
         scope: Annotated[str, Field(min_length=1, max_length=128)],
         limit: Annotated[int, Field(ge=1, le=500)] = 100,
-    ) -> dict[str, Any]:
-        return service.list_files(scope, limit=limit)
+    ) -> CallToolResult:
+        payload = service.list_files(scope, limit=limit)
+        return tool_result(payload, format_files(payload))
 
     @mcp.tool(
         title="Search related Markdown",
@@ -76,8 +79,8 @@ def build_server(config_path: str | Path) -> MCPServer:
         line: Annotated[int | None, Field(ge=1)] = None,
         document_id: Annotated[str | None, Field(min_length=1, max_length=256)] = None,
         chunk_id: Annotated[str | None, Field(min_length=1, max_length=256)] = None,
-    ) -> dict[str, Any]:
-        return service.search_related(
+    ) -> CallToolResult:
+        payload = service.search_related(
             scope,
             mode=mode,
             top_k=top_k,
@@ -87,26 +90,37 @@ def build_server(config_path: str | Path) -> MCPServer:
             document_id=document_id,
             chunk_id=chunk_id,
         )
+        return tool_result(payload, format_search(payload, mode=mode))
 
     @mcp.tool(
         title="Read Markdown",
         description=(
-            "Read a bounded hit, surrounding context, or explicitly requested full view from "
-            "one Markdown file inside a configured scope. Traversal, excluded files, symlinks, "
-            "and out-of-scope paths are rejected."
+            "Read a bounded Markdown view inside one configured scope. view is required. "
+            "For hit or around, line_start is required and line_end defaults to the same line; "
+            "around adds context_lines. For full, omit line_start and line_end. Traversal, "
+            "excluded files, symlinks, and out-of-scope paths are rejected."
         ),
         annotations=READ_ONLY_LOCAL,
     )
     def read_markdown(
         scope: Annotated[str, Field(min_length=1, max_length=128)],
         path: Annotated[str, Field(min_length=1, max_length=2048)],
-        view: Literal["hit", "around", "full"] = "hit",
-        line_start: Annotated[int | None, Field(ge=1)] = None,
-        line_end: Annotated[int | None, Field(ge=1)] = None,
+        view: Annotated[
+            Literal["hit", "around", "full"],
+            Field(description="Required view. hit/around require line_start; full needs no line range."),
+        ],
+        line_start: Annotated[
+            int | None,
+            Field(ge=1, description="Required for hit/around. Omit for full."),
+        ] = None,
+        line_end: Annotated[
+            int | None,
+            Field(ge=1, description="Optional inclusive end line for hit/around; defaults to line_start."),
+        ] = None,
         context_lines: Annotated[int, Field(ge=0, le=100)] = 20,
         max_chars: Annotated[int, Field(ge=1, le=50_000)] = 50_000,
-    ) -> dict[str, Any]:
-        return service.read(
+    ) -> CallToolResult:
+        payload = service.read(
             scope,
             path,
             view=view,
@@ -115,6 +129,7 @@ def build_server(config_path: str | Path) -> MCPServer:
             context_lines=context_lines,
             max_chars=max_chars,
         )
+        return tool_result(payload, format_read(payload))
 
     return mcp
 
