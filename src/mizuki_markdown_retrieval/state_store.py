@@ -8,8 +8,8 @@ from typing import Mapping
 
 from .indexing import ChunkSnapshot, DocumentSnapshot
 
-STATE_SCHEMA_VERSION = 3
-_SUPPORTED_SCHEMA_VERSIONS = {2, 3}
+STATE_SCHEMA_VERSION = 4
+_SUPPORTED_SCHEMA_VERSIONS = {2, 3, 4}
 
 
 class StateFormatError(ValueError):
@@ -40,6 +40,11 @@ def load_state(path: Path) -> dict[str, DocumentSnapshot]:
                 if schema_version >= 3
                 else "legacy-v2"
             )
+            provider_revision = (
+                str(item["provider_revision"])
+                if schema_version >= 4
+                else f"legacy-provider-v{schema_version}"
+            )
             snapshot = DocumentSnapshot(
                 namespace=str(item["namespace"]),
                 document_id=str(item["document_id"]),
@@ -55,6 +60,7 @@ def load_state(path: Path) -> dict[str, DocumentSnapshot]:
                     for chunk in item.get("chunks", [])
                 ),
                 representation_revision=representation_revision,
+                provider_revision=provider_revision,
             )
             if snapshot.document_id in result:
                 raise StateFormatError(
@@ -82,6 +88,7 @@ def save_state(
                 "file_hash": snapshot.file_hash,
                 "relative_path": snapshot.relative_path,
                 "representation_revision": snapshot.representation_revision,
+                "provider_revision": snapshot.provider_revision,
                 "chunks": [
                     {
                         "chunk_id": chunk.chunk_id,
