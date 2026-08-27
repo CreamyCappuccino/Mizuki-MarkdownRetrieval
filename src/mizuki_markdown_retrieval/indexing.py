@@ -8,6 +8,7 @@ from .chunking import chunk_markdown
 from .models import IndexedMarkdownFile, MarkdownChunk
 
 UpdateKind = Literal["unchanged", "new", "incremental", "full_reindex", "deleted"]
+UNSPECIFIED_PROVIDER_REVISION = "unspecified-provider-v1"
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,7 @@ class DocumentSnapshot:
     relative_path: str
     chunks: tuple[ChunkSnapshot, ...]
     representation_revision: str = "legacy"
+    provider_revision: str = UNSPECIFIED_PROVIDER_REVISION
 
 
 @dataclass(frozen=True)
@@ -67,9 +69,12 @@ def build_snapshot(
     chunks: Sequence[MarkdownChunk],
     *,
     representation_revision: str = "legacy",
+    provider_revision: str = UNSPECIFIED_PROVIDER_REVISION,
 ) -> DocumentSnapshot:
     if not representation_revision.strip():
         raise ValueError("representation_revision must not be blank")
+    if not provider_revision.strip():
+        raise ValueError("provider_revision must not be blank")
     return DocumentSnapshot(
         namespace=indexed_file.document.namespace,
         document_id=indexed_file.document.document_id,
@@ -85,6 +90,7 @@ def build_snapshot(
             for chunk in chunks
         ),
         representation_revision=representation_revision,
+        provider_revision=provider_revision,
     )
 
 
@@ -94,22 +100,26 @@ def plan_index_updates(
     *,
     full_reindex_threshold: float = 0.5,
     representation_revision: str = "legacy",
+    provider_revision: str = UNSPECIFIED_PROVIDER_REVISION,
+    force_full_reindex: bool = False,
     chunker: Callable[[IndexedMarkdownFile], Sequence[MarkdownChunk]] = chunk_markdown,
 ) -> IndexPlan:
     """Plan incremental indexing without touching embeddings or a database.
 
-    Files whose bytes *and representation revision* are unchanged never call the
-    chunker. Changed files or changed chunker/profile revisions are re-chunked
-    once. The current document version is always upserted as a whole; unchanged
-    chunk content may reuse an old embedding, while changed chunks need fresh
-    embedding work. If the changed share is greater than
-    `full_reindex_threshold`, every current chunk is re-embedded.
+    Files whose bytes, chunk representation, and provider representation are
+    unchanged never call the chunker. A provider-revision change is stronger than
+    a Markdown/content delta: every current chunk must receive a fresh embedding,
+    because vectors from the old provider revision are not reusable. The same
+    full-embed behavior is available explicitly through ``force_full_reindex``
+    for durable-store recovery.
     """
 
     if not 0 <= full_reindex_threshold <= 1:
         raise ValueError("full_reindex_threshold must be between 0 and 1")
     if not representation_revision.strip():
         raise ValueError("representation_revision must not be blank")
+    if not provider_revision.strip():
+        raise ValueError("provider_revision must not be blank")
 
     prior = dict(previous or {})
     current_ids: set[str] = set()
@@ -136,9 +146,11 @@ def plan_index_updates(
         old = prior.get(document_id)
 
         if (
-            old is not None
+            not force_full_reindex
+            and old is not None
             and old.file_hash == indexed_file.file_hash
             and old.representation_revision == representation_revision
+            and old.provider_revision == provider_revision
         ):
             snapshots[document_id] = old
             updates.append(
@@ -158,6 +170,7 @@ def plan_index_updates(
             indexed_file,
             chunks,
             representation_revision=representation_revision,
+            provider_revision=provider_revision,
         )
         snapshots[document_id] = snapshot
 
@@ -172,6 +185,25 @@ def plan_index_updates(
                     change_ratio=1.0 if chunks else 0.0,
                     upsert_chunks=chunks,
                     embed_chunks=chunks,
+                )
+            )
+            continue
+
+        provider_changed = old.provider_revision != provider_revision
+        if force_full_reindex or provider_changed:
+            updates.append(
+                DocumentUpdate(
+                    document_id=document_id,
+                    relative_path=snapshot.relative_path,
+                    kind="full_reindex",
+                    previous_source_version=old.source_version,
+                    source_version=snapshot.source_version,
+                    change_ratio=1.0 if (old.chunks or chunks) else 0.0,
+                    upsert_chunks=chunks,
+                    embed_chunks=chunks,
+                    reused_chunks=(),
+                    removed_content_hashes=tuple(chunk.content_hash for chunk in old.chunks),
+                    remove_previous_version=True,
                 )
             )
             continue
