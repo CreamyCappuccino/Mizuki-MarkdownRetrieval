@@ -26,12 +26,15 @@ def build_server(
     *,
     token_verifier: TokenVerifier | None = None,
     auth: AuthSettings | None = None,
+    security_scope: str | None = None,
 ) -> MCPServer:
     """Build the read-only Markdown Retrieval MCP server.
 
-    Local stdio callers omit ``token_verifier`` and ``auth``. A Streamable HTTP
-    resource-server wrapper may inject both together; the tool/domain contract is
-    otherwise identical.
+    Local stdio callers omit auth inputs. A Streamable HTTP resource-server
+    wrapper may inject ``token_verifier``, ``auth``, and one OAuth scope; the
+    tool/domain contract is otherwise identical. SDK v2 exposes custom tool
+    security metadata through ``_meta`` rather than a top-level
+    ``securitySchemes`` field, so no unsupported protocol field is fabricated.
     """
 
     service = ReadOnlyRetrievalService.from_config(config_path)
@@ -45,6 +48,7 @@ def build_server(
         token_verifier=token_verifier,
         auth=auth,
     )
+    security_meta = _security_meta(security_scope)
 
     @mcp.tool(
         title="List Markdown scopes",
@@ -53,6 +57,7 @@ def build_server(
             "and returns a bounded summary without filesystem roots or secret paths."
         ),
         annotations=READ_ONLY_LOCAL,
+        meta=security_meta,
     )
     def list_markdown_scopes(
         limit: Annotated[int, Field(ge=1, le=100)] = 50,
@@ -67,6 +72,7 @@ def build_server(
             "respect include/exclude and recursive scope rules."
         ),
         annotations=READ_ONLY_LOCAL,
+        meta=security_meta,
     )
     def list_markdown_files(
         scope: Annotated[str, Field(min_length=1, max_length=128)],
@@ -83,6 +89,7 @@ def build_server(
             "configured read-only SQLite index and never creates or mutates the index."
         ),
         annotations=READ_ONLY_LOCAL,
+        meta=security_meta,
     )
     def search_related_markdown(
         scope: Annotated[str, Field(min_length=1, max_length=128)],
@@ -115,6 +122,7 @@ def build_server(
             "excluded files, symlinks, and out-of-scope paths are rejected."
         ),
         annotations=READ_ONLY_LOCAL,
+        meta=security_meta,
     )
     def read_markdown(
         scope: Annotated[str, Field(min_length=1, max_length=128)],
@@ -146,6 +154,21 @@ def build_server(
         return tool_result(payload, format_read(payload))
 
     return mcp
+
+
+def _security_meta(scope: str | None) -> dict[str, object] | None:
+    if scope is None:
+        return None
+    if not scope.strip():
+        raise ValueError("security_scope must not be blank")
+    return {
+        "securitySchemes": [
+            {
+                "type": "oauth2",
+                "scopes": [scope],
+            }
+        ]
+    }
 
 
 def main() -> None:
