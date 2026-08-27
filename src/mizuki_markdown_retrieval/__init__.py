@@ -11,6 +11,7 @@ from .indexing import (
     plan_index_updates,
 )
 from .models import DocumentRef, IndexedMarkdownFile, MarkdownChunk
+from .reading import ReadViewResult, ScopedReadError, read_markdown_view
 from .refresh import RefreshPlan, apply_refresh, commit_refresh_state, prepare_refresh
 from .runtime import related_for_chunk
 from .state_store import StateFormatError, load_state, save_state
@@ -34,9 +35,11 @@ __all__ = [
     "IndexPlan",
     "IndexedMarkdownFile",
     "MarkdownChunk",
+    "ReadViewResult",
     "RefreshPlan",
     "ScopeConfig",
     "ScopeMode",
+    "ScopedReadError",
     "StateFormatError",
     "ToolkitUnavailableError",
     "apply_refresh",
@@ -49,6 +52,7 @@ __all__ = [
     "make_source_query",
     "plan_index_updates",
     "prepare_refresh",
+    "read_markdown_view",
     "related_for_chunk",
     "resolve_toolkit",
     "save_state",
