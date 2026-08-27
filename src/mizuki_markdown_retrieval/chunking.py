@@ -65,6 +65,7 @@ def chunk_markdown(
             MarkdownChunk(
                 namespace=indexed_file.document.namespace,
                 document_id=indexed_file.document.document_id,
+                source_uri=indexed_file.document.source_uri,
                 source_version=indexed_file.document.source_version,
                 chunk_id=f"c{ordinal + 1:06d}",
                 ordinal=ordinal,
