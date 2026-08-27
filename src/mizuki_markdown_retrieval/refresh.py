@@ -8,7 +8,11 @@ from .chunking import chunk_markdown, resolve_profile
 from .config import ScopeConfig
 from .discovery import discover_markdown
 from .index_apply_bridge import build_index_apply_plan
-from .indexing import IndexPlan, plan_index_updates
+from .indexing import (
+    UNSPECIFIED_PROVIDER_REVISION,
+    IndexPlan,
+    plan_index_updates,
+)
 from .state_store import load_state, save_state
 from .toolkit_bridge import resolve_toolkit
 
@@ -20,6 +24,7 @@ class RefreshPlan:
     index_plan: IndexPlan
     discovered_count: int
     representation_revision: str
+    provider_revision: str
 
     @property
     def changed_count(self) -> int:
@@ -32,13 +37,20 @@ def prepare_refresh(
     *,
     full_reindex_threshold: float = 0.5,
     chunk_profile: str = "medium",
+    provider_revision: str = UNSPECIFIED_PROVIDER_REVISION,
+    force_full_reindex: bool = False,
 ) -> RefreshPlan:
     """Prepare a refresh without advancing persisted state.
 
-    The caller should apply `index_plan` to its embedding/search storage first.
-    Only after that succeeds should `commit_refresh_state()` be called. This keeps
-    the persisted snapshot from claiming work that the provider failed to apply.
+    The provider revision participates in planning state independently from the
+    Markdown chunker representation. Changing it forces fresh embeddings for all
+    current documents, even when the Markdown bytes are unchanged. A caller may
+    also request ``force_full_reindex`` when durable-store preflight shows that
+    the local snapshot no longer has a matching durable index.
     """
+
+    if not provider_revision.strip():
+        raise ValueError("provider_revision must not be blank")
 
     previous = load_state(state_path)
     wrong_namespace = [
@@ -65,6 +77,8 @@ def prepare_refresh(
         previous,
         full_reindex_threshold=full_reindex_threshold,
         representation_revision=representation_revision,
+        provider_revision=provider_revision,
+        force_full_reindex=force_full_reindex,
         chunker=lambda indexed_file: chunk_markdown(indexed_file, profile=profile),
     )
     return RefreshPlan(
@@ -73,6 +87,7 @@ def prepare_refresh(
         index_plan=index_plan,
         discovered_count=len(indexed_files),
         representation_revision=representation_revision,
+        provider_revision=provider_revision,
     )
 
 
@@ -89,9 +104,10 @@ def apply_refresh(
 ) -> Any | None:
     """Atomically apply changed index state, then advance the local snapshot.
 
-    Provider failure leaves the state file untouched. The Markdown representation
-    revision is always folded into the shared apply_id so a chunk-profile change
-    cannot accidentally reuse an apply created for another representation.
+    Provider failure leaves the state file untouched. Markdown representation and
+    provider revision are folded into the shared apply identity. Callers that
+    prepared a provider-aware refresh cannot accidentally apply it under another
+    provider revision.
     """
 
     if not refresh.index_plan.changed:
@@ -99,10 +115,23 @@ def apply_refresh(
         return None
 
     effective_revision = dict(revision)
-    existing = effective_revision.get("representation_revision")
-    if existing is not None and existing != refresh.representation_revision:
+    existing_representation = effective_revision.get("representation_revision")
+    if (
+        existing_representation is not None
+        and existing_representation != refresh.representation_revision
+    ):
         raise ValueError("revision representation_revision disagrees with refresh")
     effective_revision["representation_revision"] = refresh.representation_revision
+
+    existing_provider = effective_revision.get("provider_revision")
+    if (
+        refresh.provider_revision != UNSPECIFIED_PROVIDER_REVISION
+        and existing_provider is not None
+        and existing_provider != refresh.provider_revision
+    ):
+        raise ValueError("revision provider_revision disagrees with refresh")
+    if refresh.provider_revision != UNSPECIFIED_PROVIDER_REVISION:
+        effective_revision["provider_revision"] = refresh.provider_revision
 
     contracts = resolve_toolkit(toolkit)
     apply_plan = build_index_apply_plan(
