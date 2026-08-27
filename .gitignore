@@ -1,0 +1,17 @@
+# Local/private workspace material
+local/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local configuration / secrets
+.env
+.env.*
+
+# macOS
+.DS_Store
