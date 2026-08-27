@@ -77,13 +77,18 @@ def read_markdown_view(
         selected = "".join(lines[selected_start - 1 : selected_end])
 
     bounded, truncated = _bound_text(selected, max_chars)
+    returned_end = _returned_line_end(
+        bounded,
+        selected_start=selected_start,
+        selected_end=selected_end,
+    )
     return ReadViewResult(
         namespace=scope.namespace,
         relative_path=normalized,
         view=view,
         text=bounded,
         line_start=selected_start,
-        line_end=selected_end,
+        line_end=returned_end,
         total_lines=total_lines,
         truncated=truncated,
     )
@@ -127,3 +132,17 @@ def _bound_text(text: str, max_chars: int) -> tuple[str, bool]:
     if len(text) <= max_chars:
         return text, False
     return text[:max_chars], True
+
+
+def _returned_line_end(
+    text: str,
+    *,
+    selected_start: int,
+    selected_end: int,
+) -> int:
+    if selected_start == 0:
+        return 0
+    if not text:
+        return selected_start - 1
+    returned_lines = text.count("\n") + (0 if text.endswith("\n") else 1)
+    return min(selected_end, selected_start + returned_lines - 1)
