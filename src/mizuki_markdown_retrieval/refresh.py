@@ -10,6 +10,7 @@ from .discovery import discover_markdown
 from .index_apply_bridge import build_index_apply_plan
 from .indexing import (
     UNSPECIFIED_PROVIDER_REVISION,
+    DocumentSnapshot,
     IndexPlan,
     plan_index_updates,
 )
@@ -22,6 +23,7 @@ class RefreshPlan:
     namespace: str
     state_path: Path
     index_plan: IndexPlan
+    baseline_snapshots: Mapping[str, DocumentSnapshot]
     discovered_count: int
     representation_revision: str
     provider_revision: str
@@ -46,7 +48,10 @@ def prepare_refresh(
     Markdown chunker representation. Changing it forces fresh embeddings for all
     current documents, even when the Markdown bytes are unchanged. A caller may
     also request ``force_full_reindex`` when durable-store preflight shows that
-    the local snapshot no longer has a matching durable index.
+    the committed snapshot no longer has a matching durable index.
+
+    ``baseline_snapshots`` preserves the exact planning baseline so an operational
+    caller can verify the durable store *before* applying an incremental plan.
     """
 
     if not provider_revision.strip():
@@ -85,6 +90,7 @@ def prepare_refresh(
         namespace=scope.namespace,
         state_path=state_path,
         index_plan=index_plan,
+        baseline_snapshots=dict(previous),
         discovered_count=len(indexed_files),
         representation_revision=representation_revision,
         provider_revision=provider_revision,
