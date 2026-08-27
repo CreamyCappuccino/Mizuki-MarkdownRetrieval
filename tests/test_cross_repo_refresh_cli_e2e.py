@@ -23,6 +23,8 @@ pytest.importorskip(
 
 from mizuki_markdown_retrieval.cli import main
 from mizuki_markdown_retrieval.mcp_service import ReadOnlyRetrievalService
+from mizuki_markdown_retrieval.sqlite_runtime import preflight_sqlite_index
+from mizuki_markdown_retrieval.state_store import load_state
 
 
 _INITIAL = "Stop loss triggers after a confirmed close and reduces risk exposure."
@@ -137,12 +139,28 @@ def test_refresh_cli_recovers_revision_and_missing_db_with_real_ruri(
     assert "status=applied" in revision_changed
     _assert_three_modes(config)
 
-    # If durable SQLite disappears while state remains, refresh rebuilds from source.
+    # The difficult recovery case: durable SQLite disappears and one source file
+    # changes before the next refresh. Baseline preflight must notice the missing
+    # committed store before applying that one-file delta and rebuild all 3 docs.
     database_path.unlink()
+    (tmp_path / "lunch.md").write_text(
+        "# Lunch\n\nPasta recipe with tomato, garlic, and basil.\n",
+        encoding="utf-8",
+    )
     assert state_path.exists()
     assert main(["--config", str(config), "refresh", "demo"]) == 0
     rebuilt = capsys.readouterr().out
     assert "changed=3" in rebuilt
     assert "status=applied" in rebuilt
     assert database_path.exists()
+
+    snapshots = load_state(state_path)
+    durable = preflight_sqlite_index(
+        database_path,
+        namespace="refresh-cli-e2e",
+        representation_revision=revision_v2,
+        snapshots=snapshots,
+    )
+    assert durable.status == "match"
+    assert len(snapshots) == 3
     _assert_three_modes(config)
