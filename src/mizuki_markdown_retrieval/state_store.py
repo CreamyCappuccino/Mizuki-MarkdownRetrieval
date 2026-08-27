@@ -8,7 +8,7 @@ from typing import Mapping
 
 from .indexing import ChunkSnapshot, DocumentSnapshot
 
-STATE_SCHEMA_VERSION = 1
+STATE_SCHEMA_VERSION = 2
 
 
 class StateFormatError(ValueError):
@@ -36,6 +36,7 @@ def load_state(path: Path) -> dict[str, DocumentSnapshot]:
     try:
         for item in documents:
             snapshot = DocumentSnapshot(
+                namespace=str(item["namespace"]),
                 document_id=str(item["document_id"]),
                 source_version=str(item["source_version"]),
                 file_hash=str(item["file_hash"]),
@@ -69,6 +70,7 @@ def save_state(
         "schema_version": STATE_SCHEMA_VERSION,
         "documents": [
             {
+                "namespace": snapshot.namespace,
                 "document_id": snapshot.document_id,
                 "source_version": snapshot.source_version,
                 "file_hash": snapshot.file_hash,
