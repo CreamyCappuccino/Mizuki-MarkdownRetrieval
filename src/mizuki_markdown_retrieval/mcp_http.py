@@ -67,6 +67,7 @@ def build_http_server(
         config_path,
         token_verifier=token_verifier,
         auth=auth,
+        security_scope=settings.required_scope,
     )
 
     @server.custom_route("/health", methods=["GET"])
