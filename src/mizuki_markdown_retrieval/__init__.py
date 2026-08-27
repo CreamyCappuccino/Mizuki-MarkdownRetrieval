@@ -1,6 +1,7 @@
 from .chunking import CHUNK_PROFILES, ChunkProfile, chunk_markdown
 from .config import FolderOverride, FolderPolicy, ScopeConfig, ScopeMode
 from .discovery import discover_markdown
+from .index_apply_bridge import build_index_apply_plan
 from .indexing import (
     ChunkSnapshot,
     DocumentSnapshot,
@@ -10,7 +11,7 @@ from .indexing import (
     plan_index_updates,
 )
 from .models import DocumentRef, IndexedMarkdownFile, MarkdownChunk
-from .refresh import RefreshPlan, commit_refresh_state, prepare_refresh
+from .refresh import RefreshPlan, apply_refresh, commit_refresh_state, prepare_refresh
 from .state_store import StateFormatError, load_state, save_state
 from .toolkit_bridge import (
     ToolkitUnavailableError,
@@ -37,6 +38,8 @@ __all__ = [
     "ScopeMode",
     "StateFormatError",
     "ToolkitUnavailableError",
+    "apply_refresh",
+    "build_index_apply_plan",
     "build_snapshot",
     "chunk_markdown",
     "commit_refresh_state",
