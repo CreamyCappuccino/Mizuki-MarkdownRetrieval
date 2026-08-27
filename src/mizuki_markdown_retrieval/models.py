@@ -25,6 +25,7 @@ class DocumentRef:
 class MarkdownChunk:
     namespace: str
     document_id: str
+    source_uri: str
     source_version: str
     chunk_id: str
     ordinal: int
