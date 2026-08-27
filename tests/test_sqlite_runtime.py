@@ -10,6 +10,7 @@ from mizuki_markdown_retrieval.sqlite_runtime import (
     SearchRuntimeUnavailableError,
     open_sqlite_apply_provider,
     open_sqlite_search_provider,
+    sqlite_index_matches_snapshots,
 )
 
 
@@ -127,3 +128,60 @@ def test_runtime_requires_sqlite_provider_export(tmp_path: Path) -> None:
             mode="literal",
             toolkit=SimpleNamespace(),
         )
+
+
+def test_index_preflight_returns_false_when_database_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def missing(*args, **kwargs):
+        raise FileNotFoundError(tmp_path / "missing.sqlite3")
+
+    monkeypatch.setattr(sqlite_runtime, "open_sqlite_search_provider", missing)
+    assert sqlite_index_matches_snapshots(
+        tmp_path / "missing.sqlite3",
+        namespace="demo",
+        representation_revision="fixture-v1",
+        snapshots={},
+    ) is False
+
+
+def test_index_preflight_compares_durable_chunks_with_snapshots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loaded_chunk = SimpleNamespace(
+        document_ref=SimpleNamespace(
+            namespace="demo", document_id="doc-1", source_version="v1"
+        ),
+        chunk_id="c1",
+        content_hash="h1",
+        ordinal=0,
+    )
+    provider = SimpleNamespace(
+        load_namespace=lambda namespace: SimpleNamespace(chunks=(loaded_chunk,))
+    )
+    monkeypatch.setattr(
+        sqlite_runtime, "open_sqlite_search_provider", lambda *args, **kwargs: provider
+    )
+    snapshots = {
+        "doc-1": SimpleNamespace(
+            namespace="demo",
+            document_id="doc-1",
+            source_version="v1",
+            chunks=(SimpleNamespace(chunk_id="c1", content_hash="h1", ordinal=0),),
+        )
+    }
+
+    assert sqlite_index_matches_snapshots(
+        tmp_path / "index.sqlite3",
+        namespace="demo",
+        representation_revision="fixture-v1",
+        snapshots=snapshots,
+    ) is True
+
+    loaded_chunk.content_hash = "different"
+    assert sqlite_index_matches_snapshots(
+        tmp_path / "index.sqlite3",
+        namespace="demo",
+        representation_revision="fixture-v1",
+        snapshots=snapshots,
+    ) is False
