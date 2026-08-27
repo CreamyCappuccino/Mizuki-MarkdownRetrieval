@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 import mizuki_markdown_retrieval.cli_refresh as cli_refresh
-from mizuki_markdown_retrieval.cli_refresh import run_refresh_command
+from mizuki_markdown_retrieval.cli_refresh import DurableIndexDriftError, run_refresh_command
 from mizuki_markdown_retrieval.project_config import ProjectConfigError, load_project_config
 
 
@@ -23,13 +23,19 @@ def _runtime(tmp_path: Path, *, with_model: bool = True):
     return load_project_config(config).get_scope("demo")
 
 
+def _baseline():
+    return {"doc": SimpleNamespace(provider_revision="fixture-v1")}
+
+
 def test_refresh_command_applies_configured_provider_and_prints_compact_receipt(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     runtime = _runtime(tmp_path)
-    refresh = SimpleNamespace(namespace="demo", discovered_count=2, changed_count=1)
+    refresh = SimpleNamespace(
+        namespace="demo", discovered_count=2, changed_count=1, baseline_snapshots={}
+    )
     provider = object()
     fake_toolkit = object()
     opened: dict[str, object] = {}
@@ -78,7 +84,7 @@ def test_refresh_command_applies_configured_provider_and_prints_compact_receipt(
     )
 
 
-def test_refresh_command_skips_provider_when_nothing_changed(
+def test_refresh_command_skips_write_provider_when_baseline_matches_and_nothing_changed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -88,18 +94,20 @@ def test_refresh_command_skips_provider_when_nothing_changed(
         namespace="demo",
         discovered_count=1,
         changed_count=0,
-        index_plan=SimpleNamespace(snapshots={}),
+        baseline_snapshots=_baseline(),
     )
     fake_toolkit = object()
     seen: dict[str, object] = {}
 
     monkeypatch.setattr(cli_refresh, "prepare_refresh", lambda *args, **kwargs: refresh)
     monkeypatch.setattr(
-        cli_refresh, "sqlite_index_matches_snapshots", lambda *args, **kwargs: True
+        cli_refresh,
+        "preflight_sqlite_index",
+        lambda *args, **kwargs: SimpleNamespace(status="match"),
     )
 
     def fail_open(*args, **kwargs):
-        raise AssertionError("provider must not open for unchanged refresh")
+        raise AssertionError("write provider must not open for unchanged refresh")
 
     monkeypatch.setattr(cli_refresh, "open_sqlite_apply_provider", fail_open)
 
@@ -136,33 +144,37 @@ def test_refresh_command_requires_configured_model_before_planning(
         run_refresh_command(runtime)
 
 
-def test_refresh_command_rebuilds_when_state_exists_but_durable_index_is_missing(
+@pytest.mark.parametrize("initial_changed", [0, 1])
+def test_refresh_command_rebuilds_all_current_docs_when_baseline_db_is_missing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    initial_changed: int,
 ) -> None:
     runtime = _runtime(tmp_path)
-    snapshots = {"doc": object()}
-    unchanged = SimpleNamespace(
+    baseline = _baseline()
+    planned = SimpleNamespace(
         namespace="demo",
-        discovered_count=1,
-        changed_count=0,
-        index_plan=SimpleNamespace(snapshots=snapshots),
+        discovered_count=3,
+        changed_count=initial_changed,
+        baseline_snapshots=baseline,
     )
     rebuild = SimpleNamespace(
         namespace="demo",
-        discovered_count=1,
-        changed_count=1,
-        index_plan=SimpleNamespace(snapshots=snapshots),
+        discovered_count=3,
+        changed_count=3,
+        baseline_snapshots=baseline,
     )
     calls: list[dict[str, object]] = []
 
     def fake_prepare(*args, **kwargs):
         calls.append(dict(kwargs))
-        return rebuild if kwargs.get("force_full_reindex") else unchanged
+        return rebuild if kwargs.get("force_full_reindex") else planned
 
     monkeypatch.setattr(cli_refresh, "prepare_refresh", fake_prepare)
     monkeypatch.setattr(
-        cli_refresh, "sqlite_index_matches_snapshots", lambda *args, **kwargs: False
+        cli_refresh,
+        "preflight_sqlite_index",
+        lambda *args, **kwargs: SimpleNamespace(status="missing"),
     )
     provider = object()
     monkeypatch.setattr(
@@ -184,3 +196,30 @@ def test_refresh_command_rebuilds_when_state_exists_but_durable_index_is_missing
     assert calls[1]["provider_revision"] == "fixture-v1"
     assert calls[1]["force_full_reindex"] is True
     assert applied == {"refresh": rebuild, "provider": provider}
+
+
+def test_refresh_command_fails_closed_on_existing_durable_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _runtime(tmp_path)
+    refresh = SimpleNamespace(
+        namespace="demo",
+        discovered_count=3,
+        changed_count=1,
+        baseline_snapshots=_baseline(),
+    )
+    monkeypatch.setattr(cli_refresh, "prepare_refresh", lambda *args, **kwargs: refresh)
+    monkeypatch.setattr(
+        cli_refresh,
+        "preflight_sqlite_index",
+        lambda *args, **kwargs: SimpleNamespace(status="mismatch"),
+    )
+
+    def fail_open(*args, **kwargs):
+        raise AssertionError("write provider must not open after drift detection")
+
+    monkeypatch.setattr(cli_refresh, "open_sqlite_apply_provider", fail_open)
+
+    with pytest.raises(DurableIndexDriftError, match="does not match"):
+        run_refresh_command(runtime)
