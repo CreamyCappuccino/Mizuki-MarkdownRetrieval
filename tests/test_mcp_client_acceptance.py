@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+import sys
 
-from mcp import Client
+from mcp import Client, StdioServerParameters
+from mcp.client.stdio import stdio_client
 from mcp.types import TextContent
 
 from mizuki_markdown_retrieval.mcp_server import build_server
@@ -82,6 +84,69 @@ def test_in_memory_mcp_client_accepts_read_only_surface_and_missing_db_fails_clo
             )
             assert missing.is_error is True
             assert missing.structured_content is None
+
+    asyncio.run(scenario())
+    assert not database_path.exists()
+
+
+def test_stdio_mcp_client_launches_real_server_process_and_reads_safely(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    database_path = tmp_path / "local" / "demo.sqlite3"
+
+    async def scenario() -> None:
+        server = StdioServerParameters(
+            command=sys.executable,
+            args=[
+                "-m",
+                "mizuki_markdown_retrieval.mcp_server",
+                "--config",
+                str(config),
+            ],
+        )
+        async with Client(stdio_client(server)) as client:
+            assert client.server_capabilities.tools is not None
+            assert client.server_info is not None
+            assert client.server_info.name == "mizuki-markdown-retrieval"
+
+            tools = await client.list_tools()
+            assert [tool.name for tool in tools.tools] == [
+                "list_markdown_scopes",
+                "list_markdown_files",
+                "search_related_markdown",
+                "read_markdown",
+            ]
+
+            read = await client.call_tool(
+                "read_markdown",
+                {
+                    "scope": "demo",
+                    "path": "rules.md",
+                    "view": "around",
+                    "line_start": 2,
+                    "context_lines": 1,
+                    "max_chars": 100,
+                },
+            )
+            assert read.is_error is False
+            assert read.structured_content is not None
+            assert read.structured_content["path"] == "rules.md"
+            assert "keep this aligned" in read.structured_content["text"]
+            assert isinstance(read.content[0], TextContent)
+            assert read.content[0].text.startswith(
+                "scope=demo path=rules.md view=around lines=1-2/2 truncated=false"
+            )
+
+            missing = await client.call_tool(
+                "search_related_markdown",
+                {
+                    "scope": "demo",
+                    "mode": "literal",
+                    "path": "rules.md",
+                    "line": 2,
+                    "top_k": 1,
+                },
+            )
+            assert missing.is_error is True
 
     asyncio.run(scenario())
     assert not database_path.exists()
