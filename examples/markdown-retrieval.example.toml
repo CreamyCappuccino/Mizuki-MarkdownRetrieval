@@ -1,0 +1,39 @@
+# Example only. Keep machine-specific/private paths in local/ or another untracked file.
+
+[[scope]]
+name = "trading-rules"
+namespace = "trading-rules"
+root = "/path/to/project"
+recursive = true
+mode = "include_all_except"
+exclude = [
+  "archive/**",
+  "scratch/**",
+]
+chunk_profile = "medium"
+full_reindex_threshold = 0.5
+state_path = "../local/trading-rules.index-state.json"
+
+# Optional child-folder policy. This override also applies to descendants.
+[[scope.override]]
+relative_dir = "strategies/private"
+inherit = true
+mode = "include_only"
+include = [
+  "approved.md",
+  "**/approved.md",
+]
+
+# A second scope can use include-only mode instead of indexing every Markdown file.
+[[scope]]
+name = "selected-docs"
+namespace = "selected-docs"
+root = "/path/to/another/project"
+recursive = true
+mode = "include_only"
+include = [
+  "rules.md",
+  "routine.md",
+  "docs/strategy/*.md",
+]
+state_path = "../local/selected-docs.index-state.json"
