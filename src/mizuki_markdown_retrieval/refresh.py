@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Mapping
 
 from .chunking import chunk_markdown, resolve_profile
 from .config import ScopeConfig
 from .discovery import discover_markdown
+from .index_apply_bridge import build_index_apply_plan
 from .indexing import IndexPlan, plan_index_updates
 from .state_store import load_state, save_state
+from .toolkit_bridge import resolve_toolkit
 
 
 @dataclass(frozen=True)
@@ -75,3 +78,39 @@ def prepare_refresh(
 
 def commit_refresh_state(refresh: RefreshPlan) -> None:
     save_state(refresh.state_path, refresh.index_plan.snapshots)
+
+
+def apply_refresh(
+    refresh: RefreshPlan,
+    *,
+    revision: Mapping[str, str],
+    provider: Any,
+    toolkit: Any | None = None,
+) -> Any | None:
+    """Atomically apply changed index state, then advance the local snapshot.
+
+    Provider failure leaves the state file untouched. The Markdown representation
+    revision is always folded into the shared apply_id so a chunk-profile change
+    cannot accidentally reuse an apply created for another representation.
+    """
+
+    if not refresh.index_plan.changed:
+        commit_refresh_state(refresh)
+        return None
+
+    effective_revision = dict(revision)
+    existing = effective_revision.get("representation_revision")
+    if existing is not None and existing != refresh.representation_revision:
+        raise ValueError("revision representation_revision disagrees with refresh")
+    effective_revision["representation_revision"] = refresh.representation_revision
+
+    contracts = resolve_toolkit(toolkit)
+    apply_plan = build_index_apply_plan(
+        refresh.index_plan,
+        namespace=refresh.namespace,
+        revision=effective_revision,
+        toolkit=contracts,
+    )
+    result = contracts.apply_index_plan(apply_plan, provider)
+    commit_refresh_state(refresh)
+    return result
