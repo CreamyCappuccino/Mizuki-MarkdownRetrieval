@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from .chunking import chunk_markdown
 from .config import ScopeConfig
 from .discovery import discover_markdown
 from .indexing import IndexPlan, plan_index_updates
@@ -26,6 +27,7 @@ def prepare_refresh(
     state_path: Path,
     *,
     full_reindex_threshold: float = 0.5,
+    chunk_profile: str = "medium",
 ) -> RefreshPlan:
     """Prepare a refresh without advancing persisted state.
 
@@ -48,6 +50,7 @@ def prepare_refresh(
         indexed_files,
         previous,
         full_reindex_threshold=full_reindex_threshold,
+        chunker=lambda indexed_file: chunk_markdown(indexed_file, profile=chunk_profile),
     )
     return RefreshPlan(
         namespace=scope.namespace,
