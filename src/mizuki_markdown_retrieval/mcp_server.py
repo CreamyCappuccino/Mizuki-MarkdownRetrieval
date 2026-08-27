@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from mcp.server import MCPServer
+from mcp.server.auth.provider import TokenVerifier
+from mcp.server.auth.settings import AuthSettings
 from mcp.types import CallToolResult, ToolAnnotations
 from pydantic import Field
 
@@ -19,8 +21,18 @@ READ_ONLY_LOCAL = ToolAnnotations(
 )
 
 
-def build_server(config_path: str | Path) -> MCPServer:
-    """Build the local read-only Markdown Retrieval MCP server."""
+def build_server(
+    config_path: str | Path,
+    *,
+    token_verifier: TokenVerifier | None = None,
+    auth: AuthSettings | None = None,
+) -> MCPServer:
+    """Build the read-only Markdown Retrieval MCP server.
+
+    Local stdio callers omit ``token_verifier`` and ``auth``. A Streamable HTTP
+    resource-server wrapper may inject both together; the tool/domain contract is
+    otherwise identical.
+    """
 
     service = ReadOnlyRetrievalService.from_config(config_path)
     mcp = MCPServer(
@@ -30,6 +42,8 @@ def build_server(config_path: str | Path) -> MCPServer:
             "Use search_related_markdown to find related rule/document chunks and "
             "read_markdown to inspect bounded source text."
         ),
+        token_verifier=token_verifier,
+        auth=auth,
     )
 
     @mcp.tool(
