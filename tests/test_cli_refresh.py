@@ -35,7 +35,11 @@ def test_refresh_command_applies_configured_provider_and_prints_compact_receipt(
     opened: dict[str, object] = {}
     applied: dict[str, object] = {}
 
-    monkeypatch.setattr(cli_refresh, "prepare_refresh", lambda *args, **kwargs: refresh)
+    def fake_prepare(*args, **kwargs):
+        assert kwargs["provider_revision"] == "fixture-v1"
+        return refresh
+
+    monkeypatch.setattr(cli_refresh, "prepare_refresh", fake_prepare)
 
     def fake_open(database_path, **kwargs):
         opened["database_path"] = database_path
@@ -80,11 +84,19 @@ def test_refresh_command_skips_provider_when_nothing_changed(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     runtime = _runtime(tmp_path)
-    refresh = SimpleNamespace(namespace="demo", discovered_count=1, changed_count=0)
+    refresh = SimpleNamespace(
+        namespace="demo",
+        discovered_count=1,
+        changed_count=0,
+        index_plan=SimpleNamespace(snapshots={}),
+    )
     fake_toolkit = object()
     seen: dict[str, object] = {}
 
     monkeypatch.setattr(cli_refresh, "prepare_refresh", lambda *args, **kwargs: refresh)
+    monkeypatch.setattr(
+        cli_refresh, "sqlite_index_matches_snapshots", lambda *args, **kwargs: True
+    )
 
     def fail_open(*args, **kwargs):
         raise AssertionError("provider must not open for unchanged refresh")
@@ -122,3 +134,53 @@ def test_refresh_command_requires_configured_model_before_planning(
 
     with pytest.raises(ProjectConfigError, match="model_path"):
         run_refresh_command(runtime)
+
+
+def test_refresh_command_rebuilds_when_state_exists_but_durable_index_is_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _runtime(tmp_path)
+    snapshots = {"doc": object()}
+    unchanged = SimpleNamespace(
+        namespace="demo",
+        discovered_count=1,
+        changed_count=0,
+        index_plan=SimpleNamespace(snapshots=snapshots),
+    )
+    rebuild = SimpleNamespace(
+        namespace="demo",
+        discovered_count=1,
+        changed_count=1,
+        index_plan=SimpleNamespace(snapshots=snapshots),
+    )
+    calls: list[dict[str, object]] = []
+
+    def fake_prepare(*args, **kwargs):
+        calls.append(dict(kwargs))
+        return rebuild if kwargs.get("force_full_reindex") else unchanged
+
+    monkeypatch.setattr(cli_refresh, "prepare_refresh", fake_prepare)
+    monkeypatch.setattr(
+        cli_refresh, "sqlite_index_matches_snapshots", lambda *args, **kwargs: False
+    )
+    provider = object()
+    monkeypatch.setattr(
+        cli_refresh, "open_sqlite_apply_provider", lambda *args, **kwargs: provider
+    )
+
+    applied: dict[str, object] = {}
+
+    def fake_apply(refresh_arg, *, revision, provider, toolkit):
+        applied["refresh"] = refresh_arg
+        applied["provider"] = provider
+        return SimpleNamespace(status="applied", apply_id="rebuild-1")
+
+    monkeypatch.setattr(cli_refresh, "apply_refresh", fake_apply)
+
+    assert run_refresh_command(runtime) == 0
+    assert len(calls) == 2
+    assert calls[0]["provider_revision"] == "fixture-v1"
+    assert calls[1]["provider_revision"] == "fixture-v1"
+    assert calls[1]["force_full_reindex"] is True
+    assert applied == {"refresh": rebuild, "provider": provider}
