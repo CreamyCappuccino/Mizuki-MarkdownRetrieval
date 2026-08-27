@@ -137,3 +137,24 @@ def test_apply_refresh_provider_failure_does_not_advance_state(
         )
 
     assert not state_path.exists()
+
+
+def test_provider_revision_change_reindexes_unchanged_markdown(tmp_path: Path) -> None:
+    note = tmp_path / "rules.md"
+    note.write_text("# A\none\n", encoding="utf-8")
+    state_path = tmp_path / "local" / "index_state.json"
+    scope = ScopeConfig(namespace="demo", root=tmp_path)
+
+    first = prepare_refresh(scope, state_path, provider_revision="provider-v1")
+    commit_refresh_state(first)
+
+    unchanged = prepare_refresh(scope, state_path, provider_revision="provider-v1")
+    assert unchanged.changed_count == 0
+
+    changed = prepare_refresh(scope, state_path, provider_revision="provider-v2")
+    assert changed.changed_count == 1
+    update = changed.index_plan.changed[0]
+    assert update.kind == "full_reindex"
+    assert update.embed_chunks == update.upsert_chunks
+    assert update.reused_chunks == ()
+    assert changed.provider_revision == "provider-v2"
