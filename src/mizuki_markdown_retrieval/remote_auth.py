@@ -8,7 +8,6 @@ from urllib.parse import urlsplit
 
 import jwt
 from jwt import PyJWKClient
-from jwt.exceptions import PyJWTError
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 
 
