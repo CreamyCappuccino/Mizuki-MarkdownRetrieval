@@ -153,6 +153,12 @@ def test_http_resource_server_exposes_discovery_auth_gate_and_safe_tool(
                         "search_related_markdown",
                         "read_markdown",
                     ]
+                    expected_security = {
+                        "securitySchemes": [
+                            {"type": "oauth2", "scopes": ["markdown:read"]}
+                        ]
+                    }
+                    assert all(tool.meta == expected_security for tool in tools.tools)
                     result = await client.call_tool("list_markdown_scopes", {"limit": 10})
                     assert result.is_error is False
                     assert result.structured_content["items"][0]["scope"] == "demo"
@@ -165,11 +171,6 @@ def test_ready_route_returns_503_without_leaking_internal_paths(
     monkeypatch,
 ) -> None:
     config = _config(tmp_path)
-    report = ReadinessReport(
-        False,
-        1,
-        (mcp_http.check_readiness.__annotations__.get("return", ReadinessReport),),
-    )
     # Build a concrete issue without putting a filesystem path into the response.
     from mizuki_markdown_retrieval.mcp_readiness import ReadinessIssue
 
