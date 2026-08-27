@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+import mizuki_markdown_retrieval.refresh as refresh_module
 from mizuki_markdown_retrieval.config import ScopeConfig
-from mizuki_markdown_retrieval.refresh import commit_refresh_state, prepare_refresh
+from mizuki_markdown_retrieval.refresh import apply_refresh, commit_refresh_state, prepare_refresh
 from mizuki_markdown_retrieval.state_store import load_state
 
 
@@ -60,3 +62,78 @@ def test_chunk_profile_change_reindexes_unchanged_markdown(tmp_path: Path) -> No
     assert update.remove_previous_version is True
     assert next(iter(changed_profile.index_plan.snapshots.values())).file_hash == file_hash
     assert changed_profile.representation_revision != first.representation_revision
+
+
+def test_apply_refresh_commits_state_only_after_provider_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    note = tmp_path / "rules.md"
+    note.write_text("# A\none\n", encoding="utf-8")
+    state_path = tmp_path / "local" / "index_state.json"
+    refresh = prepare_refresh(ScopeConfig(namespace="demo", root=tmp_path), state_path)
+
+    observed: dict[str, object] = {}
+
+    def fake_build(index_plan, *, namespace, revision, toolkit):
+        observed["revision"] = dict(revision)
+        return SimpleNamespace(apply_id="apply-1", namespace=namespace)
+
+    def fake_apply(plan, provider):
+        observed["plan"] = plan
+        observed["provider"] = provider
+        assert not state_path.exists()
+        return SimpleNamespace(apply_id=plan.apply_id, namespace=plan.namespace, status="applied")
+
+    monkeypatch.setattr(refresh_module, "build_index_apply_plan", fake_build)
+    monkeypatch.setattr(
+        refresh_module,
+        "resolve_toolkit",
+        lambda toolkit=None: SimpleNamespace(apply_index_plan=fake_apply),
+    )
+
+    provider = object()
+    result = apply_refresh(
+        refresh,
+        revision={"embedding_model": "ruri-v3", "provider_revision": "sqlite-v1"},
+        provider=provider,
+    )
+
+    assert result.status == "applied"
+    assert observed["provider"] is provider
+    assert observed["revision"]["representation_revision"] == refresh.representation_revision
+    assert load_state(state_path) == refresh.index_plan.snapshots
+
+
+def test_apply_refresh_provider_failure_does_not_advance_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    note = tmp_path / "rules.md"
+    note.write_text("# A\none\n", encoding="utf-8")
+    state_path = tmp_path / "local" / "index_state.json"
+    refresh = prepare_refresh(ScopeConfig(namespace="demo", root=tmp_path), state_path)
+
+    monkeypatch.setattr(
+        refresh_module,
+        "build_index_apply_plan",
+        lambda *args, **kwargs: SimpleNamespace(apply_id="apply-1", namespace="demo"),
+    )
+
+    def fail_apply(plan, provider):
+        raise RuntimeError("provider failed")
+
+    monkeypatch.setattr(
+        refresh_module,
+        "resolve_toolkit",
+        lambda toolkit=None: SimpleNamespace(apply_index_plan=fail_apply),
+    )
+
+    with pytest.raises(RuntimeError, match="provider failed"):
+        apply_refresh(
+            refresh,
+            revision={"embedding_model": "ruri-v3"},
+            provider=object(),
+        )
+
+    assert not state_path.exists()
