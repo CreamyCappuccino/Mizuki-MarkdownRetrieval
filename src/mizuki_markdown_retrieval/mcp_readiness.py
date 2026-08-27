@@ -31,6 +31,27 @@ class ReadinessReport:
         }
 
 
+def safe_check_readiness(
+    config_path: str | Path,
+    *,
+    toolkit=None,
+) -> ReadinessReport:
+    """Public-safe readiness wrapper.
+
+    Unexpected top-level config/probe failures collapse to one stable reason code
+    instead of leaking an exception or filesystem path across HTTP.
+    """
+
+    try:
+        return check_readiness(config_path, toolkit=toolkit)
+    except Exception:
+        return ReadinessReport(
+            ready=False,
+            scope_count=0,
+            issues=(ReadinessIssue("*", "readiness_probe_failed"),),
+        )
+
+
 def check_readiness(
     config_path: str | Path,
     *,
