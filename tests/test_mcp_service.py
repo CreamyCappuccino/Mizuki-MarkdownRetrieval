@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+import mizuki_markdown_retrieval.mcp_service as mcp_service
 from mizuki_markdown_retrieval.mcp_service import ReadOnlyRetrievalService
 from mizuki_markdown_retrieval.project_config import ProjectConfigError
 
@@ -87,3 +88,28 @@ def test_semantic_search_requires_configured_model(tmp_path: Path) -> None:
 
     with pytest.raises(ProjectConfigError, match="model_path"):
         service.search_related("demo", mode="semantic", path="rules.md", line=2)
+
+
+def test_service_reuses_literal_and_embedding_provider_lifecycles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = ReadOnlyRetrievalService.from_config(_config(tmp_path))
+    runtime = service.project.get_scope("demo")
+    opened: list[tuple[str, object]] = []
+
+    def fake_open(*args, mode: str, **kwargs):
+        provider = object()
+        opened.append((mode, provider))
+        return provider
+
+    monkeypatch.setattr(mcp_service, "open_sqlite_search_provider", fake_open)
+
+    literal_1 = service._search_provider(runtime, "literal")
+    literal_2 = service._search_provider(runtime, "literal")
+    semantic = service._search_provider(runtime, "semantic")
+    hybrid = service._search_provider(runtime, "hybrid")
+
+    assert literal_1 is literal_2
+    assert semantic is hybrid
+    assert literal_1 is not semantic
+    assert [mode for mode, _ in opened] == ["literal", "semantic"]
