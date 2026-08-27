@@ -35,9 +35,20 @@ class DocumentUpdate:
     previous_source_version: str | None
     source_version: str | None
     change_ratio: float
-    index_chunks: tuple[MarkdownChunk, ...] = ()
-    reused_content_hashes: tuple[str, ...] = ()
+    # All chunks that must exist under the *current* source_version after apply.
+    # For a changed document this is the full new document version, even when an
+    # embedding can be reused from the previous version.
+    upsert_chunks: tuple[MarkdownChunk, ...] = ()
+    # Subset of upsert_chunks that need a new embedding/search representation.
+    embed_chunks: tuple[MarkdownChunk, ...] = ()
+    # Subset of upsert_chunks whose embedding may be copied/reused by content hash.
+    reused_chunks: tuple[MarkdownChunk, ...] = ()
     removed_content_hashes: tuple[str, ...] = ()
+    remove_previous_version: bool = False
+
+    @property
+    def reused_content_hashes(self) -> tuple[str, ...]:
+        return tuple(chunk.content_hash for chunk in self.reused_chunks)
 
 
 @dataclass(frozen=True)
@@ -81,9 +92,10 @@ def plan_index_updates(
     """Plan incremental indexing without touching embeddings or a database.
 
     Files whose hash is unchanged never call the chunker. Changed files are
-    re-chunked once; unchanged chunk content can reuse an existing embedding.
-    If the changed share is greater than `full_reindex_threshold`, the whole
-    document version is marked for reindexing.
+    re-chunked once. The current document version is always upserted as a whole;
+    unchanged chunk content may reuse an old embedding, while changed chunks need
+    fresh embedding work. If the changed share is greater than
+    `full_reindex_threshold`, every current chunk is re-embedded.
     """
 
     if not 0 <= full_reindex_threshold <= 1:
@@ -140,12 +152,13 @@ def plan_index_updates(
                     previous_source_version=None,
                     source_version=snapshot.source_version,
                     change_ratio=1.0 if chunks else 0.0,
-                    index_chunks=chunks,
+                    upsert_chunks=chunks,
+                    embed_chunks=chunks,
                 )
             )
             continue
 
-        reused, to_index, removed, ratio = _chunk_delta(old, chunks)
+        reused, to_embed, removed, ratio = _chunk_delta(old, chunks)
         full_reindex = ratio > full_reindex_threshold
         updates.append(
             DocumentUpdate(
@@ -155,9 +168,11 @@ def plan_index_updates(
                 previous_source_version=old.source_version,
                 source_version=snapshot.source_version,
                 change_ratio=ratio,
-                index_chunks=chunks if full_reindex else to_index,
-                reused_content_hashes=() if full_reindex else reused,
+                upsert_chunks=chunks,
+                embed_chunks=chunks if full_reindex else to_embed,
+                reused_chunks=() if full_reindex else reused,
                 removed_content_hashes=removed,
+                remove_previous_version=True,
             )
         )
 
@@ -173,6 +188,7 @@ def plan_index_updates(
                 source_version=None,
                 change_ratio=1.0,
                 removed_content_hashes=tuple(chunk.content_hash for chunk in old.chunks),
+                remove_previous_version=True,
             )
         )
 
@@ -182,23 +198,28 @@ def plan_index_updates(
 def _chunk_delta(
     old: DocumentSnapshot,
     new_chunks: Sequence[MarkdownChunk],
-) -> tuple[tuple[str, ...], tuple[MarkdownChunk, ...], tuple[str, ...], float]:
+) -> tuple[
+    tuple[MarkdownChunk, ...],
+    tuple[MarkdownChunk, ...],
+    tuple[str, ...],
+    float,
+]:
     old_available = Counter(chunk.content_hash for chunk in old.chunks)
-    reused: list[str] = []
-    to_index: list[MarkdownChunk] = []
+    reused: list[MarkdownChunk] = []
+    to_embed: list[MarkdownChunk] = []
 
     for chunk in new_chunks:
         if old_available[chunk.content_hash] > 0:
             old_available[chunk.content_hash] -= 1
-            reused.append(chunk.content_hash)
+            reused.append(chunk)
         else:
-            to_index.append(chunk)
+            to_embed.append(chunk)
 
     removed: list[str] = []
     for content_hash, count in old_available.items():
         removed.extend([content_hash] * count)
 
-    changed_units = max(len(to_index), len(removed))
+    changed_units = max(len(to_embed), len(removed))
     denominator = max(len(old.chunks), len(new_chunks), 1)
     ratio = changed_units / denominator
-    return tuple(reused), tuple(to_index), tuple(removed), ratio
+    return tuple(reused), tuple(to_embed), tuple(removed), ratio
