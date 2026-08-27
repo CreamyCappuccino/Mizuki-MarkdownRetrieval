@@ -19,6 +19,7 @@ class ChunkSnapshot:
 
 @dataclass(frozen=True)
 class DocumentSnapshot:
+    namespace: str
     document_id: str
     source_version: str
     file_hash: str
@@ -54,6 +55,7 @@ def build_snapshot(
     chunks: Sequence[MarkdownChunk],
 ) -> DocumentSnapshot:
     return DocumentSnapshot(
+        namespace=indexed_file.document.namespace,
         document_id=indexed_file.document.document_id,
         source_version=indexed_file.document.source_version,
         file_hash=indexed_file.file_hash,
@@ -91,6 +93,15 @@ def plan_index_updates(
     current_ids: set[str] = set()
     updates: list[DocumentUpdate] = []
     snapshots: dict[str, DocumentSnapshot] = {}
+
+    current_namespaces = {item.document.namespace for item in indexed_files}
+    if len(current_namespaces) > 1:
+        raise ValueError("one index plan may only contain one namespace")
+    if current_namespaces:
+        namespace = next(iter(current_namespaces))
+        mismatched = [item for item in prior.values() if item.namespace != namespace]
+        if mismatched:
+            raise ValueError("previous index state belongs to another namespace")
 
     for indexed_file in sorted(
         indexed_files,
