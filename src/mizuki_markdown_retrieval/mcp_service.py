@@ -19,6 +19,7 @@ class ReadOnlyRetrievalService:
 
     def __init__(self, project: ProjectConfig):
         self.project = project
+        self._search_providers: dict[tuple[str, str], Any] = {}
 
     @classmethod
     def from_config(cls, path: str | Path) -> "ReadOnlyRetrievalService":
@@ -134,13 +135,7 @@ class ReadOnlyRetrievalService:
             document_id=document_id,
             chunk_id=chunk_id,
         )
-        provider = open_sqlite_search_provider(
-            search.database_path,
-            representation_revision=search.representation_revision,
-            mode=mode,
-            model_path=search.model_path,
-            device=search.device,
-        )
+        provider = self._search_provider(runtime, mode)
         operator_context: dict[str, Any] = {}
         if candidate_k is not None:
             operator_context["candidate_k"] = candidate_k
@@ -152,6 +147,33 @@ class ReadOnlyRetrievalService:
             operator_context=operator_context,
         )
         return _search_payload(runtime.name, source, result)
+
+    def _search_provider(self, runtime: Any, mode: SearchMode) -> Any:
+        """Reuse durable read-only providers for the lifetime of this service.
+
+        Literal search intentionally has a separate provider so a literal-only
+        workload never loads the embedding model. Semantic and hybrid search
+        share one embedding-backed provider for the same configured scope.
+        """
+
+        runtime_kind = "literal" if mode == "literal" else "embedding"
+        key = (runtime.name, runtime_kind)
+        cached = self._search_providers.get(key)
+        if cached is not None:
+            return cached
+
+        search = runtime.search
+        if search is None:
+            raise ProjectConfigError(f"search runtime is not configured for scope: {runtime.name}")
+        provider = open_sqlite_search_provider(
+            search.database_path,
+            representation_revision=search.representation_revision,
+            mode="literal" if runtime_kind == "literal" else "semantic",
+            model_path=search.model_path,
+            device=search.device,
+        )
+        self._search_providers[key] = provider
+        return provider
 
 
 def _validate_selector(
