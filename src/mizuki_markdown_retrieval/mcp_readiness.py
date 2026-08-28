@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from .postgres_runtime import database_url_from_env, preflight_postgres_index
 from .project_config import load_project_config
 from .refresh import prepare_refresh
-from .sqlite_runtime import preflight_sqlite_index
 
 
 @dataclass(frozen=True)
@@ -39,7 +39,7 @@ def safe_check_readiness(
     """Public-safe readiness wrapper.
 
     Unexpected top-level config/probe failures collapse to one stable reason code
-    instead of leaking an exception or filesystem path across HTTP.
+    instead of leaking an exception, database URL, or filesystem path across HTTP.
     """
 
     try:
@@ -61,8 +61,8 @@ def check_readiness(
 
     Readiness requires each configured scope to have a current source/state plan,
     an available model binding for semantic/hybrid requests, and an exact durable
-    SQLite/state match. Internal paths and exception details are intentionally not
-    returned in the public report.
+    Postgres/state match. Internal paths, database URLs, and exception details are
+    intentionally not returned in the public report.
     """
 
     config = load_project_config(Path(config_path))
@@ -75,6 +75,12 @@ def check_readiness(
             continue
         if search.model_path is None or not search.model_path.exists():
             issues.append(ReadinessIssue(name, "model_unavailable"))
+            continue
+
+        try:
+            database_url = database_url_from_env(search.database_url_env)
+        except Exception:
+            issues.append(ReadinessIssue(name, "database_unavailable"))
             continue
 
         try:
@@ -94,8 +100,10 @@ def check_readiness(
             continue
 
         try:
-            durable = preflight_sqlite_index(
-                search.database_path,
+            durable = preflight_postgres_index(
+                database_url,
+                schema=search.schema,
+                vector_dimensions=search.vector_dimensions,
                 namespace=refresh.namespace,
                 representation_revision=search.representation_revision,
                 snapshots=refresh.index_plan.snapshots,
