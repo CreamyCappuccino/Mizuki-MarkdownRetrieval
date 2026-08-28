@@ -45,6 +45,38 @@ include = ["approved.md", "**/approved.md"]
     assert policy.include == ("approved.md", "**/approved.md")
 
 
+def test_postgres_search_runtime_uses_env_name_schema_and_vector_dimensions(
+    tmp_path: Path,
+) -> None:
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    model = tmp_path / "models" / "ruri"
+    config_path = tmp_path / "markdown-retrieval.toml"
+    config_path.write_text(
+        f'''[[scope]]\nname = "demo"\nnamespace = "demo"\nroot = "{docs.as_posix()}"\n\n[scope.search]\ndatabase_url_env = "MDR_DATABASE_URL"\nschema = "mdr_demo"\nvector_dimensions = 768\nrepresentation_revision = "ruri-v3-310m@fixture"\nmodel_path = "{model.as_posix()}"\ndevice = "cpu"\n''',
+        encoding="utf-8",
+    )
+
+    runtime = load_project_config(config_path).get_scope("demo")
+    assert runtime.search is not None
+    assert runtime.search.database_url_env == "MDR_DATABASE_URL"
+    assert runtime.search.schema == "mdr_demo"
+    assert runtime.search.vector_dimensions == 768
+    assert runtime.search.representation_revision == "ruri-v3-310m@fixture"
+    assert runtime.search.model_path == model.resolve()
+
+
+def test_postgres_search_runtime_rejects_invalid_vector_dimensions(tmp_path: Path) -> None:
+    config_path = tmp_path / "markdown-retrieval.toml"
+    config_path.write_text(
+        '''[[scope]]\nname = "demo"\nnamespace = "demo"\nroot = "."\n\n[scope.search]\ndatabase_url_env = "MDR_DATABASE_URL"\nschema = "mdr_demo"\nvector_dimensions = 0\nrepresentation_revision = "fixture-v1"\n''',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ProjectConfigError, match="vector_dimensions"):
+        load_project_config(config_path)
+
+
 def test_duplicate_scope_name_rejected(tmp_path: Path) -> None:
     config_path = tmp_path / "config.toml"
     config_path.write_text(
