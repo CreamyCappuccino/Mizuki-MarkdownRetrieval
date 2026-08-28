@@ -15,9 +15,19 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from .mcp_http_gate import install_authenticated_readiness_gate
-from .mcp_readiness import safe_check_readiness
+from .mcp_readiness import safe_check_readiness as _safe_check_readiness
 from .mcp_server import build_server
 from .remote_auth import RemoteOAuthConfig, SharedOAuthJWTVerifier
+
+
+def safe_check_readiness(config_path: str | Path, *, toolkit=None):
+    """Compatibility seam around the public-safe readiness probe."""
+    return _safe_check_readiness(config_path, toolkit=toolkit)
+
+
+def check_readiness(config_path: str | Path, *, toolkit=None):
+    """Legacy seam kept for tests/callers; delegates through safe_check_readiness."""
+    return safe_check_readiness(config_path, toolkit=toolkit)
 
 
 @dataclass(frozen=True)
@@ -83,7 +93,7 @@ class RemoteHttpSettings:
     @property
     def public_hostname(self) -> str:
         hostname = urlsplit(self.resource_url).hostname
-        if hostname is None:  # guarded by __post_init__
+        if hostname is None:
             raise ValueError("resource_url must contain a hostname")
         return hostname
 
@@ -118,8 +128,6 @@ def build_http_server(
     settings: RemoteHttpSettings,
     toolkit=None,
 ) -> MCPServer:
-    """Build the authenticated read-only MCP server object."""
-
     auth = AuthSettings(
         issuer_url=AnyHttpUrl(settings.issuer_url),
         resource_server_url=AnyHttpUrl(settings.resource_url),
@@ -138,11 +146,8 @@ def build_http_server(
 
     @server.custom_route("/ready", methods=["GET"])
     async def ready(_: Request) -> JSONResponse:
-        report = safe_check_readiness(config_path, toolkit=toolkit)
-        return JSONResponse(
-            report.payload(),
-            status_code=200 if report.ready else 503,
-        )
+        report = check_readiness(config_path, toolkit=toolkit)
+        return JSONResponse(report.payload(), status_code=200 if report.ready else 503)
 
     return server
 
@@ -156,13 +161,8 @@ def build_http_app(
 ) -> tuple[MCPServer, Any]:
     """Build the production-shaped authenticated ASGI app without binding a port.
 
-    The MCP SDK owns authentication, required-scope enforcement, protected
-    resource metadata, transport security, and protocol dispatch. MDR inserts one
-    pinned-2.1.x readiness gate *inside* the SDK RequireAuthMiddleware so order is:
-
-        bearer verification -> scope check -> readiness -> MCP dispatch
+    Order is bearer verification -> scope check -> readiness -> MCP dispatch.
     """
-
     server = build_http_server(
         config_path,
         token_verifier=token_verifier,
@@ -180,7 +180,7 @@ def build_http_app(
     install_authenticated_readiness_gate(
         app,
         mcp_path=settings.mcp_path,
-        probe=lambda: safe_check_readiness(config_path, toolkit=toolkit),
+        probe=lambda: check_readiness(config_path, toolkit=toolkit),
     )
     return server, app
 
@@ -196,8 +196,6 @@ def build_shared_oauth_http_server(
     jwk_client=None,
     toolkit=None,
 ) -> tuple[MCPServer, RemoteHttpSettings]:
-    """Build server/settings from one authoritative OAuth config."""
-
     settings = RemoteHttpSettings.from_oauth_config(
         oauth,
         host=host,
@@ -228,8 +226,6 @@ def build_shared_oauth_http_app(
     jwk_client=None,
     toolkit=None,
 ) -> tuple[MCPServer, Any, RemoteHttpSettings]:
-    """Build verifier, advertised auth metadata, and ASGI app from one config."""
-
     settings = RemoteHttpSettings.from_oauth_config(
         oauth,
         host=host,
@@ -254,8 +250,6 @@ def run_http_server(
     settings: RemoteHttpSettings,
     toolkit=None,
 ) -> None:
-    """Run the hardened authenticated MCP resource server on loopback."""
-
     _, app = build_http_app(
         config_path,
         token_verifier=token_verifier,
