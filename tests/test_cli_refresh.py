@@ -10,6 +10,9 @@ from mizuki_markdown_retrieval.cli_refresh import DurableIndexDriftError, run_re
 from mizuki_markdown_retrieval.project_config import ProjectConfigError, load_project_config
 
 
+TEST_DATABASE_URL = "postgresql://fixture.invalid/mdr"
+
+
 def _runtime(tmp_path: Path, *, with_model: bool = True):
     docs = tmp_path / "docs"
     docs.mkdir()
@@ -17,7 +20,7 @@ def _runtime(tmp_path: Path, *, with_model: bool = True):
     config = tmp_path / "markdown-retrieval.toml"
     model_line = 'model_path = "local/ruri"\n' if with_model else ""
     config.write_text(
-        f'''[[scope]]\nname = "demo"\nnamespace = "demo"\nroot = "{docs.as_posix()}"\nstate_path = "local/demo-state.json"\nchunk_profile = "medium"\n\n[scope.search]\ndatabase_path = "local/demo.sqlite3"\nrepresentation_revision = "fixture-v1"\n{model_line}device = "cpu"\n''',
+        f'''[[scope]]\nname = "demo"\nnamespace = "demo"\nroot = "{docs.as_posix()}"\nstate_path = "local/demo-state.json"\nchunk_profile = "medium"\n\n[scope.search]\ndatabase_url_env = "MDR_TEST_DATABASE_URL"\nschema = "mdr_demo"\nvector_dimensions = 3\nrepresentation_revision = "fixture-v1"\n{model_line}device = "cpu"\n''',
         encoding="utf-8",
     )
     return load_project_config(config).get_scope("demo")
@@ -27,11 +30,16 @@ def _baseline():
     return {"doc": SimpleNamespace(provider_revision="fixture-v1")}
 
 
+def _set_database_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MDR_TEST_DATABASE_URL", TEST_DATABASE_URL)
+
+
 def test_refresh_command_applies_configured_provider_and_prints_compact_receipt(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    _set_database_env(monkeypatch)
     runtime = _runtime(tmp_path)
     refresh = SimpleNamespace(
         namespace="demo", discovered_count=2, changed_count=1, baseline_snapshots={}
@@ -47,12 +55,12 @@ def test_refresh_command_applies_configured_provider_and_prints_compact_receipt(
 
     monkeypatch.setattr(cli_refresh, "prepare_refresh", fake_prepare)
 
-    def fake_open(database_path, **kwargs):
-        opened["database_path"] = database_path
+    def fake_open(database_url, **kwargs):
+        opened["database_url"] = database_url
         opened.update(kwargs)
         return provider
 
-    monkeypatch.setattr(cli_refresh, "open_sqlite_apply_provider", fake_open)
+    monkeypatch.setattr(cli_refresh, "open_postgres_apply_provider", fake_open)
 
     def fake_apply(refresh_arg, *, revision, provider, toolkit):
         applied["refresh"] = refresh_arg
@@ -66,7 +74,9 @@ def test_refresh_command_applies_configured_provider_and_prints_compact_receipt(
     assert run_refresh_command(runtime, toolkit=fake_toolkit) == 0
 
     assert opened == {
-        "database_path": runtime.search.database_path,
+        "database_url": TEST_DATABASE_URL,
+        "schema": "mdr_demo",
+        "vector_dimensions": 3,
         "representation_revision": "fixture-v1",
         "model_path": runtime.search.model_path,
         "device": "cpu",
@@ -89,6 +99,7 @@ def test_refresh_command_skips_write_provider_when_baseline_matches_and_nothing_
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    _set_database_env(monkeypatch)
     runtime = _runtime(tmp_path)
     refresh = SimpleNamespace(
         namespace="demo",
@@ -102,14 +113,14 @@ def test_refresh_command_skips_write_provider_when_baseline_matches_and_nothing_
     monkeypatch.setattr(cli_refresh, "prepare_refresh", lambda *args, **kwargs: refresh)
     monkeypatch.setattr(
         cli_refresh,
-        "preflight_sqlite_index",
+        "preflight_postgres_index",
         lambda *args, **kwargs: SimpleNamespace(status="match"),
     )
 
     def fail_open(*args, **kwargs):
         raise AssertionError("write provider must not open for unchanged refresh")
 
-    monkeypatch.setattr(cli_refresh, "open_sqlite_apply_provider", fail_open)
+    monkeypatch.setattr(cli_refresh, "open_postgres_apply_provider", fail_open)
 
     def fake_apply(refresh_arg, *, revision, provider, toolkit):
         seen.update(
@@ -133,6 +144,7 @@ def test_refresh_command_skips_write_provider_when_baseline_matches_and_nothing_
 def test_refresh_command_requires_configured_model_before_planning(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    _set_database_env(monkeypatch)
     runtime = _runtime(tmp_path, with_model=False)
 
     def fail_prepare(*args, **kwargs):
@@ -150,6 +162,7 @@ def test_refresh_command_rebuilds_all_current_docs_when_baseline_db_is_missing(
     monkeypatch: pytest.MonkeyPatch,
     initial_changed: int,
 ) -> None:
+    _set_database_env(monkeypatch)
     runtime = _runtime(tmp_path)
     baseline = _baseline()
     planned = SimpleNamespace(
@@ -173,12 +186,12 @@ def test_refresh_command_rebuilds_all_current_docs_when_baseline_db_is_missing(
     monkeypatch.setattr(cli_refresh, "prepare_refresh", fake_prepare)
     monkeypatch.setattr(
         cli_refresh,
-        "preflight_sqlite_index",
+        "preflight_postgres_index",
         lambda *args, **kwargs: SimpleNamespace(status="missing"),
     )
     provider = object()
     monkeypatch.setattr(
-        cli_refresh, "open_sqlite_apply_provider", lambda *args, **kwargs: provider
+        cli_refresh, "open_postgres_apply_provider", lambda *args, **kwargs: provider
     )
 
     applied: dict[str, object] = {}
@@ -202,6 +215,7 @@ def test_refresh_command_fails_closed_on_existing_durable_drift(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _set_database_env(monkeypatch)
     runtime = _runtime(tmp_path)
     refresh = SimpleNamespace(
         namespace="demo",
@@ -212,14 +226,14 @@ def test_refresh_command_fails_closed_on_existing_durable_drift(
     monkeypatch.setattr(cli_refresh, "prepare_refresh", lambda *args, **kwargs: refresh)
     monkeypatch.setattr(
         cli_refresh,
-        "preflight_sqlite_index",
+        "preflight_postgres_index",
         lambda *args, **kwargs: SimpleNamespace(status="mismatch"),
     )
 
     def fail_open(*args, **kwargs):
         raise AssertionError("write provider must not open after drift detection")
 
-    monkeypatch.setattr(cli_refresh, "open_sqlite_apply_provider", fail_open)
+    monkeypatch.setattr(cli_refresh, "open_postgres_apply_provider", fail_open)
 
     with pytest.raises(DurableIndexDriftError, match="does not match"):
         run_refresh_command(runtime)
