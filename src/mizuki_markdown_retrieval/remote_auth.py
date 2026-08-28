@@ -97,11 +97,14 @@ class SharedOAuthJWTVerifier(TokenVerifier):
         *,
         jwk_client: SigningKeyClient | None = None,
         now_fn=time.time,
+        monotonic_fn=time.monotonic,
     ) -> None:
         self.config = config
         self._now_fn = now_fn
+        self._monotonic_fn = monotonic_fn
         self._unknown_kids: dict[str, float] = {}
         self._known_kids: set[str] = set()
+        self._known_signing_keys: dict[str, tuple[float, Any]] = {}
         self._unknown_kid_global_until = 0.0
         self._jwks_lookup_lock = asyncio.Lock()
         self._jwk_client: SigningKeyClient = jwk_client or PyJWKClient(
@@ -172,12 +175,23 @@ class SharedOAuthJWTVerifier(TokenVerifier):
         now = float(self._now_fn())
         self._reject_cooled_down_kid(kid, now=now)
 
+        # Successful signing keys have their own bounded TTL cache. This is the
+        # normal fast path: a previously accepted kid never waits behind an
+        # attacker-controlled slow unknown-kid JWKS refresh while its key is
+        # still fresh. Signature and claim validation still run for every token.
+        cached = self._get_cached_signing_key(kid)
+        if cached is not None:
+            return cached
+
         # PyJWKClient is synchronous and may perform network I/O. Keep the event
-        # loop free, and serialize refresh attempts so a unique-kid spray cannot
-        # create concurrent JWKS fetches. Known kids may continue through the
-        # global unknown-kid cooldown so normal cached verification/key rotation
-        # is not blocked by unrelated attacker-controlled kids.
+        # loop free, and serialize only cache-miss/refresh attempts so a unique-
+        # kid spray cannot create concurrent JWKS fetches.
         async with self._jwks_lookup_lock:
+            # Another request may have populated this key while we waited.
+            cached = self._get_cached_signing_key(kid)
+            if cached is not None:
+                return cached
+
             now = float(self._now_fn())
             self._reject_cooled_down_kid(kid, now=now)
             if kid not in self._known_kids and self._unknown_kid_global_until > now:
@@ -198,7 +212,24 @@ class SharedOAuthJWTVerifier(TokenVerifier):
 
             self._known_kids.add(kid)
             self._unknown_kids.pop(kid, None)
+            self._cache_signing_key(kid, signing_key)
             return signing_key
+
+    def _get_cached_signing_key(self, kid: str):
+        cached = self._known_signing_keys.get(kid)
+        if cached is None:
+            return None
+        expires_at, signing_key = cached
+        if expires_at <= float(self._monotonic_fn()):
+            self._known_signing_keys.pop(kid, None)
+            return None
+        return signing_key
+
+    def _cache_signing_key(self, kid: str, signing_key: Any) -> None:
+        self._known_signing_keys[kid] = (
+            float(self._monotonic_fn()) + self.config.jwks_cache_seconds,
+            signing_key,
+        )
 
     def _reject_cooled_down_kid(self, kid: str, *, now: float) -> None:
         blocked_until = self._unknown_kids.get(kid)
