@@ -7,84 +7,84 @@ The initial use case is update-miss detection across project Markdown files: whe
 ## Architecture
 
 ```text
-Markdown files
+Markdown files (canonical source)
   -> scoped discovery
   -> heading-aware chunking
   -> incremental index planning
   -> Markdown -> Retrieval Toolkit boundary mapping
   -> atomic persistent apply via shared Toolkit/SearchE provider
+  -> PostgreSQL + pgvector durable retrieval index
   -> related-document retrieval
   -> bounded source reads
 ```
 
-The repository owns Markdown-specific work:
+MDR owns Markdown-specific behavior:
 
-- folder inclusion/exclusion and recursive inheritance,
-- Markdown discovery,
-- heading/line metadata,
-- chunking,
-- source-version and content-hash change planning,
-- local snapshot state,
-- conversion into generic Retrieval Toolkit contracts.
+- source roots, include/exclude policy, and symlink safety;
+- heading-aware chunk metadata;
+- incremental source snapshots and refresh planning;
+- conversion into generic Retrieval Toolkit contracts;
+- bounded reads back to canonical Markdown.
 
-The shared Retrieval Toolkit/SearchE side owns generic retrieval operators and persistent provider behavior.
+The shared Retrieval Toolkit/SearchE side owns generic retrieval operators and persistent provider behavior. MDR v1 uses the Toolkit's PostgreSQL/pgvector provider. SQLite remains a generic Toolkit backend but is not an MDR production runtime.
+
+Markdown remains canonical. PostgreSQL is a rebuildable retrieval/index generation, not an independently authored source of truth.
 
 ## Current status
 
 Implemented:
 
-- Version-scoped chunk identity with stable `document_id`, `source_version`, `chunk_id`, and zero-based `ordinal`.
-- Heading-aware Markdown chunking with path, heading ancestry, line ranges, content hashes, and chunk profile metadata.
-- Recursive folder policy with `include_all_except` and `include_only`, plus child overrides.
+- Recursive Markdown discovery with include/exclude and child overrides.
+- Heading-aware chunks with source-version and line metadata.
 - Incremental file/chunk change planning.
-- Persisted index state with namespace and representation revision tracking.
-- Representation-aware refresh: chunk-profile/chunker changes trigger safe reindex even when Markdown bytes are unchanged.
-- Generic atomic persistent apply mapping:
-  - remove old version,
-  - upsert the exact current version,
-  - reuse unchanged embeddings,
-  - embed changed chunks.
-- Provider apply occurs before local snapshot commit; provider failure leaves local state untouched.
-- Provider-agnostic `related_for_chunk()` runtime helper for `changed_chunk_related` search from a durable index.
-- Current source-chunk resolution by either human-friendly `path + line` or machine-friendly `document_id + chunk_id`.
-- Bounded `hit / around / full` Markdown read views with scope/include/exclude/symlink enforcement and explicit `max_chars` truncation.
+- Persisted local refresh state with namespace/provider revision tracking.
+- Representation-aware refresh: chunk-profile or provider-revision changes force safe reindexing even when Markdown bytes are unchanged.
+- PostgreSQL + pgvector durable store through the shared Retrieval Toolkit.
+- Native pgvector semantic search; literal and hybrid modes remain SearchE/Toolkit responsibilities.
+- Atomic persistent apply before local state commit.
+- Durable preflight that fails closed on PostgreSQL/state drift and rebuilds all current documents when the durable schema is missing.
+- Provider-agnostic `related_for_chunk()` retrieval.
+- Current source-chunk resolution by `path + line` or `document_id + chunk_id`.
+- Bounded `hit / around / full` Markdown reads.
 - TOML project configuration with multiple named scopes.
 - Read-only CLI commands: `validate`, `discover`, `plan`, `read`, `search`.
-- Explicit durable index mutation command: `refresh`.
-- Local read-only MCP v2 server with explicit safety annotations and bounded tool schemas.
-- MCP client acceptance tests for in-memory and real stdio process transport.
+- Explicit mutation command: `refresh`.
+- Local read-only MCP v2 server.
+- Remote HTTP + Shared OAuth Resource Server implementation, with public publication kept behind a separate deployment gate.
 - GitHub Actions pytest CI.
 
-The Markdown boundary has been independently tested against the shared Retrieval Toolkit v0 implementation, including self-exclusion, document grouping, metadata round-trip, fail-closed namespace filtering, atomic persistent apply, durable reopen, and related-document search.
+The Markdown boundary has been tested against the shared Retrieval Toolkit, including self-exclusion, document grouping, metadata round-trip, fail-closed namespace filtering, atomic persistent apply, durable reopen, and related-document search.
 
-`tests/test_cross_repo_sqlite_e2e.py` is an optional real integration test. It runs when the shared `retrieval_toolkit`/SearchE package is available on `PYTHONPATH`; the public standalone CI skips it rather than requiring access to a separate private repository. `tests/test_cross_repo_mcp_client_acceptance.py` additionally exercises literal, semantic, and hybrid search through an MCP client when a real Ruri model is supplied through `MIZUKI_MDR_RURI_MODEL_PATH`.
+`tests/test_cross_repo_postgres_e2e.py` is an optional real integration test using the shared SearchE/Toolkit PostgreSQL provider with a deterministic embedding fixture. `tests/test_cross_repo_refresh_cli_e2e.py` additionally exercises real Ruri refresh and literal/semantic/hybrid retrieval when `MIZUKI_MDR_RURI_MODEL_PATH`, `MDR_TEST_DATABASE_URL`, and the SearchE package are available. The public standalone MDR CI may skip private cross-repo dependencies rather than requiring access to the private SearchE repository.
 
 ## Local/private material
 
-Machine-specific or private project files belong under repository-root `local/` (or another untracked location). `local/`, `.env*`, caches, and virtual environments are ignored by Git.
+Do not commit:
 
-Do not put source Markdown content that should remain private into tracked fixtures or examples.
+- database URLs or credentials;
+- OAuth/token material;
+- private Markdown corpora;
+- local Ruri model caches;
+- generated runtime state containing private deployment paths when those paths are operationally sensitive.
 
-## Configuration
+The TOML stores only the **name** of the environment variable containing the database URL.
 
-See `examples/markdown-retrieval.example.toml`.
+## Project configuration
 
-A minimal scope:
+Example scope:
 
 ```toml
 [[scope]]
 name = "rules"
-namespace = "rules"
-root = "/path/to/project"
+namespace = "project-rules"
+root = "/absolute/path/to/project/docs"
 recursive = true
 mode = "include_all_except"
-exclude = ["archive/**"]
-state_path = "local/rules.index-state.json"
-```
+exclude = ["archive/**", "private/**"]
+state_path = "/owner-only/path/state/rules.index-state.json"
+chunk_profile = "medium"
+full_reindex_threshold = 0.5
 
-Child-folder behavior can be overridden without configuring every descendant separately:
-
-```toml
 [[scope.override]]
 relative_dir = "strategies/private"
 inherit = true
@@ -92,21 +92,33 @@ mode = "include_only"
 include = ["approved.md", "**/approved.md"]
 ```
 
-Pin the durable SearchE runtime inside the scope instead of accepting arbitrary database/model paths from MCP callers or the mutating refresh command:
+Configure the durable retrieval runtime inside the scope. MCP/CLI callers cannot supply an alternate database, schema, model, or representation revision:
 
 ```toml
 [scope.search]
-database_path = "local/rules.sqlite3"
-representation_revision = "ruri-v3-310m-v1"
+database_url_env = "MDR_DATABASE_URL"
+schema = "mdr_rules"
+vector_dimensions = 768
+representation_revision = "ruri-v3-310m@accepted-revision"
 model_path = "/path/to/ruri-v3-310m"
 device = "cpu"
 ```
 
-`representation_revision` is part of the durable provider/apply identity. Bump it whenever the embedding model, provider representation, or another stored-vector compatibility input changes. `model_path` may be omitted for literal-only read/search use, but `refresh` requires it because changed chunks may need new embeddings.
+The process environment then supplies the owner-controlled PostgreSQL URL:
+
+```bash
+export MDR_DATABASE_URL='postgresql://...'
+```
+
+Do not place the URL itself in the TOML or Git repository.
+
+`representation_revision` is part of the durable provider/apply identity. Bump it whenever the embedding model or another stored-vector compatibility input changes. Literal-only read/search does not load Ruri, while semantic/hybrid search and `refresh` require the configured model.
+
+Each scope gets its own PostgreSQL schema. `vector_dimensions` must match the selected embedding model.
 
 ## CLI
 
-After installation:
+Validate and inspect source scopes:
 
 ```bash
 mizuki-mdr --config markdown-retrieval.toml validate
@@ -114,79 +126,62 @@ mizuki-mdr --config markdown-retrieval.toml discover rules
 mizuki-mdr --config markdown-retrieval.toml plan rules
 ```
 
-`plan` is intentionally read-only. It does **not** advance persisted state.
+`plan` is read-only and never advances committed refresh state.
 
 ### Durable index refresh
 
-`refresh` is the one explicit durable-index mutation command. It reads the database path, model path, representation revision, and device from the selected scope's `[scope.search]` configuration; there are no CLI flags that redirect the mutation to an arbitrary database or model.
+`refresh` is the one explicit durable-index mutation command:
 
 ```bash
 mizuki-mdr --config markdown-retrieval.toml refresh rules
 ```
 
-The command uses the shared atomic apply contract:
+It uses only the selected scope's owner-controlled configuration:
 
-1. discover and plan the current Markdown state;
-2. if changes exist, open the configured writable SearchE SQLite provider and apply the complete desired version atomically;
-3. commit the local snapshot only after provider success.
+1. discover and plan current Markdown state;
+2. preflight committed state against the durable PostgreSQL/pgvector generation;
+3. on changes, open the writable shared Toolkit provider and atomically apply the desired version;
+4. commit local state only after provider success.
 
-A provider failure leaves the local state snapshot untouched. If no Markdown or representation change is pending, the command does not open the embedding/provider runtime and reports `status=unchanged` after reconciling the snapshot.
+If PostgreSQL/state drift is detected, refresh fails closed. If committed state exists but the durable schema disappeared, refresh rebuilds all current documents rather than applying an unsafe partial delta. A no-op refresh does not load Ruri or a write provider.
 
-### Bounded reads
-
-Read just a hit, nearby context, or an explicitly bounded full file through the same configured scope boundary:
+### Safe Markdown reads
 
 ```bash
-mizuki-mdr --config markdown-retrieval.toml read rules strategies/entry.md \
-  --view hit --line-start 40 --line-end 48
-
-mizuki-mdr --config markdown-retrieval.toml read rules strategies/entry.md \
-  --view around --line-start 40 --line-end 48 --context-lines 12
-
-mizuki-mdr --config markdown-retrieval.toml read rules strategies/entry.md \
-  --view full --max-chars 50000
+mizuki-mdr --config markdown-retrieval.toml read rules docs/rules.md \
+  --view around --line-start 120 --line-end 125 --context-lines 20
 ```
 
 ### Related-document search
 
-`search` reads an **existing durable SQLite index** produced through the shared Retrieval Toolkit provider. The command itself is read-only.
-
-Human-friendly source selection uses a current Markdown path and one-based line:
+Search uses the durable PostgreSQL/pgvector runtime configured in TOML. There are no CLI flags for database URL, schema, model path, or provider revision.
 
 ```bash
 mizuki-mdr --config markdown-retrieval.toml search rules \
-  --database local/rules.sqlite3 \
-  --representation-revision ruri-v3-310m-v1 \
-  --mode semantic \
-  --model-path /path/to/ruri-v3-310m \
-  --path strategies/entry.md \
-  --line 44 \
+  --mode hybrid \
+  --path docs/rules.md \
+  --line 123 \
   --top-k 5
 ```
 
-Machine callers can select the same current chunk by identity:
+Machine callers may select a current source chunk by identity:
 
 ```bash
 mizuki-mdr --config markdown-retrieval.toml search rules \
-  --database local/rules.sqlite3 \
-  --representation-revision ruri-v3-310m-v1 \
   --mode semantic \
-  --model-path /path/to/ruri-v3-310m \
-  --document-id <document-id> \
-  --chunk-id <chunk-id> \
+  --document-id '<document-id>' \
+  --chunk-id '<chunk-id>' \
+  --top-k 5 \
   --json
 ```
 
-Modes are `semantic`, `literal`, and `hybrid`. Semantic/hybrid search requires the SearchE Ruri embedding runtime and an explicit `--model-path`; literal search does not load an embedding model. The representation revision must match the durable index that is being opened.
-
-Programmatic integrations can use `apply_refresh()` for the atomic apply-before-state sequence, `related_for_chunk()` for related-document retrieval, and `read_markdown_view()` for bounded source reads.
+Modes are `semantic`, `literal`, and `hybrid`. Literal search does not load the embedding model. Semantic and hybrid use the configured Ruri runtime.
 
 ## MCP server
 
-The local MCP v0 surface is intentionally **stdio, configured-scope-only, bounded, and read-only**. Install the MCP extra and run it over stdio:
+Run the local stdio MCP server:
 
 ```bash
-python -m pip install -e '.[mcp]'
 mizuki-mdr-mcp --config markdown-retrieval.toml
 ```
 
@@ -197,17 +192,32 @@ Exposed tools:
 - `search_related_markdown` — `semantic | literal | hybrid` related-document search from `path+line` or `document_id+chunk_id`.
 - `read_markdown` — bounded `hit | around | full` source reads.
 
-All four tools explicitly advertise `readOnlyHint=true`, `destructiveHint=false`, `idempotentHint=true`, and `openWorldHint=false`. Those annotations are client hints only; safety is also enforced in server-side scope/path validation and by opening the durable SQLite provider in true read-only mode.
+All four tools advertise `readOnlyHint=true`, `destructiveHint=false`, `idempotentHint=true`, and `openWorldHint=false`. Safety is also enforced by server-side scope/path validation and a read-only PostgreSQL provider for MCP/search requests.
 
-The MCP server does **not** expose arbitrary filesystem roots, database paths, model paths, provider revisions, or index-refresh mutation as tool inputs. Those runtime details are fixed in the TOML scope configuration. Normal MCP `content` is compact model-facing plain text while the full payload remains in `structuredContent`.
+The MCP surface never accepts arbitrary filesystem roots, database URLs, schemas, model paths, provider revisions, or refresh mutation as tool inputs. Those runtime details are fixed by owner configuration. Normal MCP `content` is compact model-facing text while full payloads remain in `structuredContent`.
 
-The v0 boundary has been accepted against the shared SearchE environment, including real Ruri literal/semantic/hybrid search, provider lifecycle reuse, missing-database fail-closed behavior, required read-view intent, and compact content plus structured payload. Public Streamable HTTP/OAuth publication remains a separate phase and should not be enabled until authentication, resource/audience checks, descriptor validation, and real-client tests are complete.
+Remote HTTP/Shared OAuth has a separately accepted local implementation. Public DNS/Tunnel/Shared OAuth registration remains behind `docs/public_http_oauth_publication_gate.md` and production host-binding acceptance.
+
+## Shared SearchE / Retrieval Toolkit revision
+
+PostgreSQL/pgvector persistence is a shared Toolkit responsibility, not copied into MDR. Production packaging should pin a tested SearchE/Toolkit artifact revision rather than use mutable source/PYTHONPATH.
+
+Current pgvector integration candidate:
+
+```text
+Codex-SearchEngine 31086ad319266f26a4ed1231a9de6bb3e2efe5b5
+```
+
+That revision has GitHub Actions coverage against a real `pgvector/pgvector` PostgreSQL service. The final production receipt must record the exact pinned artifact/hash actually installed.
 
 ## Not implemented yet
 
-- A persistent SearchE provider bundled inside this repository. Persistent providers remain a shared SearchE/Toolkit responsibility and are injected at integration time.
+- Production artifact packaging/pinning for SearchE/Toolkit in the MDR runtime venv.
+- Production remote console entrypoint and launchd/Ops host binding.
+- Cross-process operator refresh lock.
+- Exact production source-scope manifest.
 - File watching / automatic refresh loop.
-- Public Streamable HTTP/OAuth connector publication.
-- Optional later GraphRAG operators.
+- Public Cloudflare/Shared OAuth connector publication.
+- Optional later structural-around/GraphRAG operators.
 
-These remain separate from the Markdown parsing/index-planning layer so the adapter does not absorb SearchE or Toolkit responsibilities.
+These remain separate from the Markdown parsing/index-planning layer so the adapter does not absorb unrelated infrastructure responsibilities.
