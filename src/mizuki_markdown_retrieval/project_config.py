@@ -15,7 +15,9 @@ class ProjectConfigError(ValueError):
 
 @dataclass(frozen=True)
 class SearchRuntimeConfig:
-    database_path: Path
+    database_url_env: str
+    schema: str
+    vector_dimensions: int
     representation_revision: str
     model_path: Path | None = None
     device: str = "cpu"
@@ -127,7 +129,22 @@ def _parse_search_runtime(
     if not isinstance(raw, dict):
         raise ProjectConfigError(f"scope.search for {scope_name} must be a table")
 
-    database_path = _resolve_path(base_dir, _required_text(raw, "database_path"))
+    database_url_env = _required_text(raw, "database_url_env")
+    schema = _required_text(raw, "schema")
+    if not _is_simple_postgres_identifier(schema):
+        raise ProjectConfigError(
+            f"schema for {scope_name} must be a simple PostgreSQL identifier"
+        )
+    try:
+        vector_dimensions = int(raw.get("vector_dimensions"))
+    except (TypeError, ValueError) as exc:
+        raise ProjectConfigError(
+            f"vector_dimensions for {scope_name} must be an integer"
+        ) from exc
+    if not 1 <= vector_dimensions <= 2000:
+        raise ProjectConfigError(
+            f"vector_dimensions for {scope_name} must be between 1 and 2000"
+        )
     revision = _required_text(raw, "representation_revision")
     model_raw = raw.get("model_path")
     if model_raw is None:
@@ -142,7 +159,9 @@ def _parse_search_runtime(
     if not device:
         raise ProjectConfigError(f"device for {scope_name} must not be blank")
     return SearchRuntimeConfig(
-        database_path=database_path,
+        database_url_env=database_url_env,
+        schema=schema,
+        vector_dimensions=vector_dimensions,
         representation_revision=revision,
         model_path=model_path,
         device=device,
@@ -188,6 +207,12 @@ def _string_tuple(value: object, field_name: str) -> tuple[str, ...]:
     if isinstance(value, tuple) and all(isinstance(item, str) for item in value):
         return value
     raise ProjectConfigError(f"{field_name} must be a string array")
+
+
+def _is_simple_postgres_identifier(value: str) -> bool:
+    if not value or not (value[0].isalpha() or value[0] == "_"):
+        return False
+    return all(char.isalnum() or char == "_" for char in value)
 
 
 def _resolve_path(base_dir: Path, value: str) -> Path:
