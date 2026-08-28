@@ -4,11 +4,11 @@ from pathlib import Path
 from typing import Any, Literal
 
 from .discovery import discover_markdown
+from .postgres_runtime import database_url_from_env, open_postgres_search_provider
 from .project_config import ProjectConfig, ProjectConfigError, load_project_config
 from .reading import read_markdown_view
 from .runtime import related_for_chunk
 from .source_resolver import resolve_source_chunk
-from .sqlite_runtime import open_sqlite_search_provider
 
 SearchMode = Literal["semantic", "literal", "hybrid"]
 ReadView = Literal["hit", "around", "full"]
@@ -149,11 +149,11 @@ class ReadOnlyRetrievalService:
         return _search_payload(runtime.name, source, result)
 
     def _search_provider(self, runtime: Any, mode: SearchMode) -> Any:
-        """Reuse durable read-only providers for the lifetime of this service.
+        """Reuse durable read-only pgvector providers for this service lifetime.
 
         Literal search intentionally has a separate provider so a literal-only
-        workload never loads the embedding model. Semantic and hybrid search
-        share one embedding-backed provider for the same configured scope.
+        workload never loads Ruri. Semantic and hybrid share one model-backed
+        provider for the same configured scope.
         """
 
         runtime_kind = "literal" if mode == "literal" else "embedding"
@@ -165,8 +165,11 @@ class ReadOnlyRetrievalService:
         search = runtime.search
         if search is None:
             raise ProjectConfigError(f"search runtime is not configured for scope: {runtime.name}")
-        provider = open_sqlite_search_provider(
-            search.database_path,
+        database_url = database_url_from_env(search.database_url_env)
+        provider = open_postgres_search_provider(
+            database_url,
+            schema=search.schema,
+            vector_dimensions=search.vector_dimensions,
             representation_revision=search.representation_revision,
             mode="literal" if runtime_kind == "literal" else "semantic",
             model_path=search.model_path,
