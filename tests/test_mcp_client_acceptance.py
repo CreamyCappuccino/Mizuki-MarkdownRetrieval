@@ -17,7 +17,7 @@ def _config(tmp_path: Path) -> Path:
     (docs / "rules.md").write_text("# Rules\nkeep this aligned\n", encoding="utf-8")
     config = tmp_path / "markdown-retrieval.toml"
     config.write_text(
-        f'''[[scope]]\nname = "demo"\nnamespace = "demo"\nroot = "{docs.as_posix()}"\n\n[scope.search]\ndatabase_path = "local/demo.sqlite3"\nrepresentation_revision = "fixture-v1"\n''',
+        f'''[[scope]]\nname = "demo"\nnamespace = "demo"\nroot = "{docs.as_posix()}"\n\n[scope.search]\ndatabase_url_env = "MDR_TEST_MISSING_DATABASE_URL"\nschema = "mdr_demo"\nvector_dimensions = 3\nrepresentation_revision = "fixture-v1"\n''',
         encoding="utf-8",
     )
     return config
@@ -27,7 +27,6 @@ def test_in_memory_mcp_client_accepts_read_only_surface_and_missing_db_fails_clo
     tmp_path: Path,
 ) -> None:
     config = _config(tmp_path)
-    database_path = tmp_path / "local" / "demo.sqlite3"
 
     async def scenario() -> None:
         server = build_server(config)
@@ -86,12 +85,10 @@ def test_in_memory_mcp_client_accepts_read_only_surface_and_missing_db_fails_clo
             assert missing.structured_content is None
 
     asyncio.run(scenario())
-    assert not database_path.exists()
 
 
 def test_stdio_mcp_client_launches_real_server_process_and_reads_safely(tmp_path: Path) -> None:
     config = _config(tmp_path)
-    database_path = tmp_path / "local" / "demo.sqlite3"
 
     async def scenario() -> None:
         server = StdioServerParameters(
@@ -149,4 +146,3 @@ def test_stdio_mcp_client_launches_real_server_process_and_reads_safely(tmp_path
             assert missing.is_error is True
 
     asyncio.run(scenario())
-    assert not database_path.exists()
