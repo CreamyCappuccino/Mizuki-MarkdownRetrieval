@@ -28,7 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     refresh = subparsers.add_parser(
         "refresh",
-        help="apply a durable SQLite index refresh for one configured scope",
+        help="apply a durable Postgres/pgvector index refresh for one configured scope",
     )
     refresh.add_argument("scope", help="scope name from config")
     refresh.add_argument("--json", action="store_true")
@@ -45,18 +45,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     search = subparsers.add_parser(
         "search",
-        help="find indexed documents related to a current Markdown chunk",
+        help="find indexed documents through the scope's configured Postgres/pgvector runtime",
     )
     search.add_argument("scope", help="scope name from config")
-    search.add_argument("--database", required=True, help="durable SQLite index path")
-    search.add_argument(
-        "--representation-revision",
-        required=True,
-        help="persistent provider representation revision used to build the index",
-    )
     search.add_argument("--mode", choices=("semantic", "literal", "hybrid"), default="semantic")
-    search.add_argument("--model-path", help="Ruri model/cache path for semantic/hybrid search")
-    search.add_argument("--device", default="cpu", help="embedding device (default: cpu)")
     search.add_argument("--path", help="human source selector: relative Markdown path")
     search.add_argument("--line", type=int, help="human source selector: one-based line")
     search.add_argument("--document-id", help="machine source selector: current document_id")
@@ -80,11 +72,11 @@ def validate_search_selector(parser: argparse.ArgumentParser, args: argparse.Nam
         parser.error("--top-k must be >= 1")
     if args.candidate_k is not None and args.candidate_k < 1:
         parser.error("--candidate-k must be >= 1")
-    if args.mode in {"semantic", "hybrid"} and args.model_path is None:
-        parser.error("semantic/hybrid search requires --model-path")
 
 
 def resolve_cli_path(base_dir: Path, value: str) -> Path:
+    """Legacy helper kept for import compatibility; search runtime is config-owned."""
+
     path = Path(value).expanduser()
     if not path.is_absolute():
         path = base_dir / path
