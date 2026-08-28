@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import Any, Mapping
 
 from .indexing import DocumentSnapshot
@@ -11,6 +12,7 @@ from .postgres_runtime import (
 )
 from .project_config import ProjectConfigError, RuntimeScope
 from .refresh import apply_refresh, prepare_refresh
+from .refresh_lock import exclusive_refresh_lock
 
 
 class DurableIndexDriftError(RuntimeError):
@@ -25,6 +27,20 @@ def run_refresh_command(
 ) -> int:
     """Build/apply one durable pgvector index refresh from the configured scope."""
 
+    with exclusive_refresh_lock(runtime.state_path):
+        return _run_refresh_locked(
+            runtime,
+            json_output=json_output,
+            toolkit=toolkit,
+        )
+
+
+def _run_refresh_locked(
+    runtime: RuntimeScope,
+    *,
+    json_output: bool,
+    toolkit: Any | None,
+) -> int:
     search = runtime.search
     if search is None:
         raise ProjectConfigError(f"search runtime is not configured for scope: {runtime.name}")
@@ -59,13 +75,16 @@ def run_refresh_command(
                 "refusing partial refresh"
             )
         if preflight.status == "missing" and refresh.baseline_snapshots:
-            refresh = prepare_refresh(
-                runtime.scope,
-                runtime.state_path,
-                full_reindex_threshold=runtime.full_reindex_threshold,
-                chunk_profile=runtime.chunk_profile,
-                provider_revision=search.representation_revision,
-                force_full_reindex=True,
+            refresh = replace(
+                prepare_refresh(
+                    runtime.scope,
+                    runtime.state_path,
+                    full_reindex_threshold=runtime.full_reindex_threshold,
+                    chunk_profile=runtime.chunk_profile,
+                    provider_revision=search.representation_revision,
+                    force_full_reindex=True,
+                ),
+                expected_generation=None,
             )
 
     provider = None
