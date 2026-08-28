@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from dataclasses import dataclass
@@ -34,6 +35,7 @@ class RemoteOAuthConfig:
     jwks_timeout_seconds: float = 5.0
     jwks_cache_seconds: float = 300.0
     unknown_kid_cooldown_seconds: float = 10.0
+    unknown_kid_global_cooldown_seconds: float = 1.0
     max_unknown_kids: int = 256
 
     def __post_init__(self) -> None:
@@ -54,6 +56,10 @@ class RemoteOAuthConfig:
             raise ValueError("jwks_cache_seconds must be between 1 and 86400")
         if not 1 <= self.unknown_kid_cooldown_seconds <= 300:
             raise ValueError("unknown_kid_cooldown_seconds must be between 1 and 300")
+        if not 0.1 <= self.unknown_kid_global_cooldown_seconds <= 60:
+            raise ValueError(
+                "unknown_kid_global_cooldown_seconds must be between 0.1 and 60"
+            )
         if not 16 <= self.max_unknown_kids <= 4096:
             raise ValueError("max_unknown_kids must be between 16 and 4096")
 
@@ -95,6 +101,9 @@ class SharedOAuthJWTVerifier(TokenVerifier):
         self.config = config
         self._now_fn = now_fn
         self._unknown_kids: dict[str, float] = {}
+        self._known_kids: set[str] = set()
+        self._unknown_kid_global_until = 0.0
+        self._jwks_lookup_lock = asyncio.Lock()
         self._jwk_client: SigningKeyClient = jwk_client or PyJWKClient(
             config.jwks_url,
             cache_keys=False,
@@ -109,13 +118,13 @@ class SharedOAuthJWTVerifier(TokenVerifier):
 
     async def verify_token(self, token: str) -> AccessToken | None:
         try:
-            return self._verify(token)
+            return await self._verify(token)
         except Exception:
             # Bearer authentication must fail closed without leaking crypto/JWKS
             # details through the HTTP boundary.
             return None
 
-    def _verify(self, token: str) -> AccessToken:
+    async def _verify(self, token: str) -> AccessToken:
         if not isinstance(token, str) or not token or len(token) > _MAX_TOKEN_CHARS:
             raise ValueError("invalid token size")
 
@@ -128,7 +137,7 @@ class SharedOAuthJWTVerifier(TokenVerifier):
         if not isinstance(kid, str) or not kid or len(kid) > _MAX_KID_CHARS:
             raise ValueError("invalid kid")
 
-        signing_key = self._get_signing_key(kid)
+        signing_key = await self._get_signing_key(kid)
         claims = jwt.decode(
             token,
             signing_key.key,
@@ -159,22 +168,45 @@ class SharedOAuthJWTVerifier(TokenVerifier):
             claims=safe_claims,
         )
 
-    def _get_signing_key(self, kid: str):
+    async def _get_signing_key(self, kid: str):
         now = float(self._now_fn())
-        blocked_until = self._unknown_kids.get(kid)
-        if blocked_until is not None:
-            if blocked_until > now:
-                raise ValueError("unknown kid is cooling down")
+        self._reject_cooled_down_kid(kid, now=now)
+
+        # PyJWKClient is synchronous and may perform network I/O. Keep the event
+        # loop free, and serialize refresh attempts so a unique-kid spray cannot
+        # create concurrent JWKS fetches. Known kids may continue through the
+        # global unknown-kid cooldown so normal cached verification/key rotation
+        # is not blocked by unrelated attacker-controlled kids.
+        async with self._jwks_lookup_lock:
+            now = float(self._now_fn())
+            self._reject_cooled_down_kid(kid, now=now)
+            if kid not in self._known_kids and self._unknown_kid_global_until > now:
+                raise ValueError("unknown kid refresh is cooling down")
+
+            try:
+                signing_key = await asyncio.to_thread(
+                    self._jwk_client.get_signing_key, kid
+                )
+            except Exception:
+                now = float(self._now_fn())
+                self._remember_unknown_kid(kid, now=now)
+                self._unknown_kid_global_until = max(
+                    self._unknown_kid_global_until,
+                    now + self.config.unknown_kid_global_cooldown_seconds,
+                )
+                raise
+
+            self._known_kids.add(kid)
             self._unknown_kids.pop(kid, None)
+            return signing_key
 
-        try:
-            signing_key = self._jwk_client.get_signing_key(kid)
-        except Exception:
-            self._remember_unknown_kid(kid, now=now)
-            raise
-
+    def _reject_cooled_down_kid(self, kid: str, *, now: float) -> None:
+        blocked_until = self._unknown_kids.get(kid)
+        if blocked_until is None:
+            return
+        if blocked_until > now:
+            raise ValueError("unknown kid is cooling down")
         self._unknown_kids.pop(kid, None)
-        return signing_key
 
     def _remember_unknown_kid(self, kid: str, *, now: float) -> None:
         expired = [
