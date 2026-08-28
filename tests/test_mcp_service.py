@@ -9,6 +9,9 @@ from mizuki_markdown_retrieval.mcp_service import ReadOnlyRetrievalService
 from mizuki_markdown_retrieval.project_config import ProjectConfigError
 
 
+TEST_DATABASE_URL = "postgresql://fixture.invalid/mdr"
+
+
 def _config(tmp_path: Path) -> Path:
     docs = tmp_path / "docs"
     docs.mkdir()
@@ -18,7 +21,7 @@ def _config(tmp_path: Path) -> Path:
     (private / "secret.md").write_text("secret\n", encoding="utf-8")
     config = tmp_path / "markdown-retrieval.toml"
     config.write_text(
-        f'''[[scope]]\nname = "demo"\nnamespace = "demo"\nroot = "{docs.as_posix()}"\nexclude = ["private/**"]\n\n[scope.search]\ndatabase_path = "local/demo.sqlite3"\nrepresentation_revision = "fixture-v1"\n''',
+        f'''[[scope]]\nname = "demo"\nnamespace = "demo"\nroot = "{docs.as_posix()}"\nexclude = ["private/**"]\n\n[scope.search]\ndatabase_url_env = "MDR_TEST_DATABASE_URL"\nschema = "mdr_demo"\nvector_dimensions = 3\nrepresentation_revision = "fixture-v1"\n''',
         encoding="utf-8",
     )
     return config
@@ -43,7 +46,7 @@ def test_service_lists_bounded_scopes_without_secret_paths(tmp_path: Path) -> No
     }
     rendered = repr(result)
     assert str(tmp_path) not in rendered
-    assert "demo.sqlite3" not in rendered
+    assert "MDR_TEST_DATABASE_URL" not in rendered
 
 
 def test_service_lists_only_in_scope_markdown(tmp_path: Path) -> None:
@@ -96,13 +99,17 @@ def test_service_reuses_literal_and_embedding_provider_lifecycles(
     service = ReadOnlyRetrievalService.from_config(_config(tmp_path))
     runtime = service.project.get_scope("demo")
     opened: list[tuple[str, object]] = []
+    monkeypatch.setenv("MDR_TEST_DATABASE_URL", TEST_DATABASE_URL)
 
-    def fake_open(*args, mode: str, **kwargs):
+    def fake_open(database_url, *, mode: str, **kwargs):
+        assert database_url == TEST_DATABASE_URL
+        assert kwargs["schema"] == "mdr_demo"
+        assert kwargs["vector_dimensions"] == 3
         provider = object()
         opened.append((mode, provider))
         return provider
 
-    monkeypatch.setattr(mcp_service, "open_sqlite_search_provider", fake_open)
+    monkeypatch.setattr(mcp_service, "open_postgres_search_provider", fake_open)
 
     literal_1 = service._search_provider(runtime, "literal")
     literal_2 = service._search_provider(runtime, "literal")
