@@ -135,17 +135,25 @@ class ReadOnlyRetrievalService:
             document_id=document_id,
             chunk_id=chunk_id,
         )
-        provider = self._search_provider(runtime, mode)
-        operator_context: dict[str, Any] = {}
-        if candidate_k is not None:
-            operator_context["candidate_k"] = candidate_k
-        result = related_for_chunk(
-            source,
-            index_provider=provider,
-            mode=mode,
-            top_k=top_k,
-            operator_context=operator_context,
-        )
+        try:
+            provider = self._search_provider(runtime, mode)
+            operator_context: dict[str, Any] = {}
+            if candidate_k is not None:
+                operator_context["candidate_k"] = candidate_k
+            result = related_for_chunk(
+                source,
+                index_provider=provider,
+                mode=mode,
+                top_k=top_k,
+                operator_context=operator_context,
+            )
+        except Exception:
+            return _search_failure_payload(
+                runtime.name,
+                source,
+                code="provider_unavailable",
+                message="configured search backend is unavailable",
+            )
         return _search_payload(runtime.name, source, result)
 
     def _search_provider(self, runtime: Any, mode: SearchMode) -> Any:
@@ -200,14 +208,44 @@ def _validate_selector(
         raise ValueError("line must be >= 1")
 
 
+def _search_failure_payload(
+    scope_name: str,
+    source: Any,
+    *,
+    code: str,
+    message: str,
+) -> dict[str, Any]:
+    return {
+        "scope": scope_name,
+        "namespace": source.namespace,
+        "source": {
+            "document_id": source.document_id,
+            "chunk_id": source.chunk_id,
+            "path": source.relative_path,
+            "heading_path": list(source.heading_path),
+            "line_start": source.line_start,
+            "line_end": source.line_end,
+        },
+        "error": {"code": code, "message": message, "details": {}},
+        "items": [],
+    }
+
+
 def _search_payload(scope_name: str, source: Any, result: Any) -> dict[str, Any]:
     error = None
     if result.error is not None:
-        error = {
-            "code": result.error.code,
-            "message": result.error.message,
-            "details": dict(result.error.details),
-        }
+        if result.error.code == "provider_failure":
+            error = {
+                "code": "provider_unavailable",
+                "message": "configured search backend is unavailable",
+                "details": {},
+            }
+        else:
+            error = {
+                "code": result.error.code,
+                "message": result.error.message,
+                "details": dict(result.error.details),
+            }
 
     items = []
     for group in result.items:
