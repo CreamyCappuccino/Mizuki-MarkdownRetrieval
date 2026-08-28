@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -27,6 +29,8 @@ class RefreshPlan:
     discovered_count: int
     representation_revision: str
     provider_revision: str
+    expected_generation: str | None
+    resulting_generation: str
 
     @property
     def changed_count(self) -> int:
@@ -52,6 +56,8 @@ def prepare_refresh(
 
     ``baseline_snapshots`` preserves the exact planning baseline so an operational
     caller can verify the durable store *before* applying an incremental plan.
+    Generation tokens fence a prepared plan against another writer advancing the
+    same durable namespace before this plan commits.
     """
 
     if not provider_revision.strip():
@@ -94,6 +100,10 @@ def prepare_refresh(
         discovered_count=len(indexed_files),
         representation_revision=representation_revision,
         provider_revision=provider_revision,
+        expected_generation=(
+            None if not previous else snapshot_generation(previous)
+        ),
+        resulting_generation=snapshot_generation(index_plan.snapshots),
     )
 
 
@@ -113,7 +123,8 @@ def apply_refresh(
     Provider failure leaves the state file untouched. Markdown representation and
     provider revision are folded into the shared apply identity. Callers that
     prepared a provider-aware refresh cannot accidentally apply it under another
-    provider revision.
+    provider revision. Expected/resulting generation metadata lets a durable
+    provider reject a stale plan even when another host races the local workflow.
     """
 
     if not refresh.index_plan.changed:
@@ -144,8 +155,45 @@ def apply_refresh(
         refresh.index_plan,
         namespace=refresh.namespace,
         revision=effective_revision,
+        expected_generation=refresh.expected_generation,
+        resulting_generation=refresh.resulting_generation,
         toolkit=contracts,
     )
     result = contracts.apply_index_plan(apply_plan, provider)
     commit_refresh_state(refresh)
     return result
+
+
+def snapshot_generation(snapshots: Mapping[str, DocumentSnapshot]) -> str:
+    """Return a deterministic generation token for one complete committed state."""
+
+    payload = [
+        {
+            "namespace": snapshot.namespace,
+            "document_id": snapshot.document_id,
+            "source_version": snapshot.source_version,
+            "file_hash": snapshot.file_hash,
+            "relative_path": snapshot.relative_path,
+            "representation_revision": snapshot.representation_revision,
+            "provider_revision": snapshot.provider_revision,
+            "chunks": [
+                {
+                    "chunk_id": chunk.chunk_id,
+                    "ordinal": chunk.ordinal,
+                    "content_hash": chunk.content_hash,
+                }
+                for chunk in snapshot.chunks
+            ],
+        }
+        for snapshot in sorted(
+            snapshots.values(),
+            key=lambda item: (item.namespace, item.document_id),
+        )
+    ]
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return "mdr-state-" + hashlib.sha256(encoded).hexdigest()
