@@ -120,3 +120,34 @@ def test_service_reuses_literal_and_embedding_provider_lifecycles(
     assert semantic is hybrid
     assert literal_1 is not semantic
     assert [mode for mode, _ in opened] == ["literal", "semantic"]
+
+
+def test_service_sanitizes_backend_exception_details(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = ReadOnlyRetrievalService.from_config(_config(tmp_path))
+    monkeypatch.setenv("MDR_TEST_DATABASE_URL", TEST_DATABASE_URL)
+    sensitive = "postgresql://user:password@secret-host/private-db schema=private_schema"
+
+    def fail_open(*args, **kwargs):
+        raise RuntimeError(sensitive)
+
+    monkeypatch.setattr(mcp_service, "open_postgres_search_provider", fail_open)
+
+    payload = service.search_related(
+        "demo",
+        mode="literal",
+        path="rules.md",
+        line=2,
+        top_k=1,
+    )
+
+    assert payload["items"] == []
+    assert payload["error"] == {
+        "code": "provider_unavailable",
+        "message": "configured search backend is unavailable",
+        "details": {},
+    }
+    assert sensitive not in repr(payload)
+    assert "secret-host" not in repr(payload)
+    assert "private_schema" not in repr(payload)
