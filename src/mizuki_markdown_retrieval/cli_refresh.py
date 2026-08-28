@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from dataclasses import replace
 from typing import Any, Mapping
 
 from .indexing import DocumentSnapshot
@@ -75,16 +74,14 @@ def _run_refresh_locked(
                 "refusing partial refresh"
             )
         if preflight.status == "missing" and refresh.baseline_snapshots:
-            refresh = replace(
-                prepare_refresh(
-                    runtime.scope,
-                    runtime.state_path,
-                    full_reindex_threshold=runtime.full_reindex_threshold,
-                    chunk_profile=runtime.chunk_profile,
-                    provider_revision=search.representation_revision,
-                    force_full_reindex=True,
-                ),
-                expected_generation=None,
+            refresh = prepare_refresh(
+                runtime.scope,
+                runtime.state_path,
+                full_reindex_threshold=runtime.full_reindex_threshold,
+                chunk_profile=runtime.chunk_profile,
+                provider_revision=search.representation_revision,
+                force_full_reindex=True,
+                expect_empty_durable_store=True,
             )
 
     provider = None
