@@ -14,7 +14,11 @@ from pydantic import AnyHttpUrl
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from .mcp_http_gate import install_authenticated_readiness_gate
+from .mcp_http_gate import (
+    ReadinessProbeController,
+    install_authenticated_readiness_gate,
+)
+from .mcp_http_limits import BoundedRequestApp
 from .mcp_readiness import safe_check_readiness as _safe_check_readiness
 from .mcp_server import build_server
 from .remote_auth import RemoteOAuthConfig, SharedOAuthJWTVerifier
@@ -40,6 +44,9 @@ class RemoteHttpSettings:
     mcp_path: str = "/mcp"
     max_request_body_size: int = 65_536
     max_concurrent_requests: int = 32
+    request_timeout_seconds: float = 30.0
+    readiness_timeout_seconds: float = 2.0
+    readiness_cache_ttl_seconds: float = 2.0
 
     def __post_init__(self) -> None:
         if self.host not in {"127.0.0.1", "localhost", "::1"}:
@@ -54,6 +61,12 @@ class RemoteHttpSettings:
             raise ValueError("max_request_body_size must be between 4096 and 1048576")
         if not 1 <= self.max_concurrent_requests <= 512:
             raise ValueError("max_concurrent_requests must be between 1 and 512")
+        if not 0.5 <= self.request_timeout_seconds <= 300:
+            raise ValueError("request_timeout_seconds must be between 0.5 and 300")
+        if not 0.1 <= self.readiness_timeout_seconds <= 30:
+            raise ValueError("readiness_timeout_seconds must be between 0.1 and 30")
+        if not 0.1 <= self.readiness_cache_ttl_seconds <= 60:
+            raise ValueError("readiness_cache_ttl_seconds must be between 0.1 and 60")
 
         issuer = urlsplit(self.issuer_url)
         resource = urlsplit(self.resource_url)
@@ -77,6 +90,9 @@ class RemoteHttpSettings:
         port: int = 7010,
         max_request_body_size: int = 65_536,
         max_concurrent_requests: int = 32,
+        request_timeout_seconds: float = 30.0,
+        readiness_timeout_seconds: float = 2.0,
+        readiness_cache_ttl_seconds: float = 2.0,
     ) -> "RemoteHttpSettings":
         resource_path = urlsplit(oauth.resource).path
         return cls(
@@ -88,6 +104,9 @@ class RemoteHttpSettings:
             mcp_path=resource_path,
             max_request_body_size=max_request_body_size,
             max_concurrent_requests=max_concurrent_requests,
+            request_timeout_seconds=request_timeout_seconds,
+            readiness_timeout_seconds=readiness_timeout_seconds,
+            readiness_cache_ttl_seconds=readiness_cache_ttl_seconds,
         )
 
     @property
@@ -127,6 +146,7 @@ def build_http_server(
     token_verifier: TokenVerifier,
     settings: RemoteHttpSettings,
     toolkit=None,
+    readiness_controller: ReadinessProbeController | None = None,
 ) -> MCPServer:
     auth = AuthSettings(
         issuer_url=AnyHttpUrl(settings.issuer_url),
@@ -140,13 +160,19 @@ def build_http_server(
         security_scope=settings.required_scope,
     )
 
+    controller = readiness_controller or ReadinessProbeController(
+        lambda: check_readiness(config_path, toolkit=toolkit),
+        timeout_seconds=settings.readiness_timeout_seconds,
+        cache_ttl_seconds=settings.readiness_cache_ttl_seconds,
+    )
+
     @server.custom_route("/health", methods=["GET"])
     async def health(_: Request) -> JSONResponse:
         return JSONResponse({"status": "ok"})
 
     @server.custom_route("/ready", methods=["GET"])
     async def ready(_: Request) -> JSONResponse:
-        report = check_readiness(config_path, toolkit=toolkit)
+        report = await controller.get()
         return JSONResponse(report.payload(), status_code=200 if report.ready else 503)
 
     return server
@@ -161,15 +187,22 @@ def build_http_app(
 ) -> tuple[MCPServer, Any]:
     """Build the production-shaped authenticated ASGI app without binding a port.
 
-    Order is bearer verification -> scope check -> readiness -> MCP dispatch.
+    Order is request budget -> bearer verification -> scope check -> readiness ->
+    MCP dispatch. The app-level limiter remains effective under any ASGI runner.
     """
+    controller = ReadinessProbeController(
+        lambda: check_readiness(config_path, toolkit=toolkit),
+        timeout_seconds=settings.readiness_timeout_seconds,
+        cache_ttl_seconds=settings.readiness_cache_ttl_seconds,
+    )
     server = build_http_server(
         config_path,
         token_verifier=token_verifier,
         settings=settings,
         toolkit=toolkit,
+        readiness_controller=controller,
     )
-    app = server.streamable_http_app(
+    raw_app = server.streamable_http_app(
         streamable_http_path=settings.mcp_path,
         json_response=True,
         stateless_http=True,
@@ -178,9 +211,15 @@ def build_http_app(
         transport_security=settings.transport_security(),
     )
     install_authenticated_readiness_gate(
-        app,
+        raw_app,
         mcp_path=settings.mcp_path,
-        probe=lambda: check_readiness(config_path, toolkit=toolkit),
+        controller=controller,
+    )
+    app = BoundedRequestApp(
+        raw_app,
+        mcp_path=settings.mcp_path,
+        timeout_seconds=settings.request_timeout_seconds,
+        max_concurrent_requests=settings.max_concurrent_requests,
     )
     return server, app
 
@@ -193,15 +232,26 @@ def build_shared_oauth_http_server(
     port: int = 7010,
     max_request_body_size: int = 65_536,
     max_concurrent_requests: int = 32,
+    request_timeout_seconds: float = 30.0,
+    readiness_timeout_seconds: float = 2.0,
+    readiness_cache_ttl_seconds: float = 2.0,
     jwk_client=None,
     toolkit=None,
 ) -> tuple[MCPServer, RemoteHttpSettings]:
+    """Build only the MCPServer object for focused tests/internal composition.
+
+    Production callers must use build_shared_oauth_http_app() or run_http_server()
+    so authenticated readiness and app-level request limits cannot be skipped.
+    """
     settings = RemoteHttpSettings.from_oauth_config(
         oauth,
         host=host,
         port=port,
         max_request_body_size=max_request_body_size,
         max_concurrent_requests=max_concurrent_requests,
+        request_timeout_seconds=request_timeout_seconds,
+        readiness_timeout_seconds=readiness_timeout_seconds,
+        readiness_cache_ttl_seconds=readiness_cache_ttl_seconds,
     )
     verifier = SharedOAuthJWTVerifier(oauth, jwk_client=jwk_client)
     return (
@@ -223,6 +273,9 @@ def build_shared_oauth_http_app(
     port: int = 7010,
     max_request_body_size: int = 65_536,
     max_concurrent_requests: int = 32,
+    request_timeout_seconds: float = 30.0,
+    readiness_timeout_seconds: float = 2.0,
+    readiness_cache_ttl_seconds: float = 2.0,
     jwk_client=None,
     toolkit=None,
 ) -> tuple[MCPServer, Any, RemoteHttpSettings]:
@@ -232,6 +285,9 @@ def build_shared_oauth_http_app(
         port=port,
         max_request_body_size=max_request_body_size,
         max_concurrent_requests=max_concurrent_requests,
+        request_timeout_seconds=request_timeout_seconds,
+        readiness_timeout_seconds=readiness_timeout_seconds,
+        readiness_cache_ttl_seconds=readiness_cache_ttl_seconds,
     )
     verifier = SharedOAuthJWTVerifier(oauth, jwk_client=jwk_client)
     server, app = build_http_app(
