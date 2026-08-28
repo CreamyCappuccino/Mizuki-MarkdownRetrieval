@@ -65,10 +65,10 @@ Alternative: M1 snapshot-replica serving. This must remain out of scope until ge
 
 ## 5. Proposed local origin
 
-Candidate:
+Selected v1 candidate port:
 
 ```text
-http://127.0.0.1:4440
+http://127.0.0.1:7010
 ```
 
 Candidate endpoints:
@@ -87,7 +87,7 @@ Requirements:
 - health and readiness are separate
 - readiness must fail closed when the durable index is missing, stale, or representation-incompatible
 
-**Decision required:** confirm port `4440` after a final live conflict probe on the chosen active machine.
+**Owner decision:** use port `7010` for v1. A final live conflict probe on the chosen active machine is still required before service installation.
 
 ## 6. Proposed canonical public URL
 
@@ -267,7 +267,7 @@ See `docs/public_http_oauth_publication_gate.md`.
 |---|---|---|---|
 | A | Serving machine | M4 active, no auto failover | pending owner decision |
 | B | Canonical hostname | `mdr.strangebasket.com` | pending owner decision |
-| C | Loopback port | `4440` after live conflict probe | pending owner decision |
+| C | Loopback port | `7010` after live conflict probe | owner selected; probe pending |
 | D | Owner config/env paths | `~/.config/mizuki-markdown-retrieval/...` | pending owner decision |
 | E | Data/index authority | co-located authoritative roots + DB + state + Ruri; one refresh writer | exact paths pending |
 | F | Availability/freshness | fail closed, no automatic failover v1 | pending owner decision |
