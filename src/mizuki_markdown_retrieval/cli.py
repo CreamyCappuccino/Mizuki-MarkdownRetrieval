@@ -8,6 +8,7 @@ from .cli_output import plan_payload, print_search_payload
 from .cli_parser import build_parser, validate_search_selector
 from .cli_refresh import run_refresh_command
 from .discovery import discover_markdown
+from .indexing import UNSPECIFIED_PROVIDER_REVISION
 from .mcp_service import ReadOnlyRetrievalService
 from .project_config import load_project_config
 from .reading import read_markdown_view
@@ -47,11 +48,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "plan":
+        provider_revision = (
+            runtime.search.representation_revision
+            if runtime.search is not None
+            else UNSPECIFIED_PROVIDER_REVISION
+        )
         refresh = prepare_refresh(
             runtime.scope,
             runtime.state_path,
             full_reindex_threshold=runtime.full_reindex_threshold,
             chunk_profile=runtime.chunk_profile,
+            provider_revision=provider_revision,
         )
         if args.json:
             print(json.dumps(plan_payload(runtime.name, refresh), ensure_ascii=False, indent=2))
