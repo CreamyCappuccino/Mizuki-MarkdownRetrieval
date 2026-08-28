@@ -45,6 +45,7 @@ def prepare_refresh(
     chunk_profile: str = "medium",
     provider_revision: str = UNSPECIFIED_PROVIDER_REVISION,
     force_full_reindex: bool = False,
+    expect_empty_durable_store: bool = False,
 ) -> RefreshPlan:
     """Prepare a refresh without advancing persisted state.
 
@@ -57,7 +58,9 @@ def prepare_refresh(
     ``baseline_snapshots`` preserves the exact planning baseline so an operational
     caller can verify the durable store *before* applying an incremental plan.
     Generation tokens fence a prepared plan against another writer advancing the
-    same durable namespace before this plan commits.
+    same durable namespace before this plan commits. When a preflight proves the
+    durable store is missing, ``expect_empty_durable_store`` makes the full rebuild
+    CAS against an empty durable generation rather than the local baseline state.
     """
 
     if not provider_revision.strip():
@@ -101,7 +104,9 @@ def prepare_refresh(
         representation_revision=representation_revision,
         provider_revision=provider_revision,
         expected_generation=(
-            None if not previous else snapshot_generation(previous)
+            None
+            if expect_empty_durable_store or not previous
+            else snapshot_generation(previous)
         ),
         resulting_generation=snapshot_generation(index_plan.snapshots),
     )
