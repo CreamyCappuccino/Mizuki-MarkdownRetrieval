@@ -14,7 +14,7 @@ def _config(tmp_path: Path) -> Path:
     (docs / "rules.md").write_text("# Rules\nkeep this aligned\n", encoding="utf-8")
     config = tmp_path / "markdown-retrieval.toml"
     config.write_text(
-        f'''[[scope]]\nname = "demo"\nnamespace = "demo"\nroot = "{docs.as_posix()}"\n\n[scope.search]\ndatabase_path = "local/demo.sqlite3"\nrepresentation_revision = "fixture-v1"\n''',
+        f'''[[scope]]\nname = "demo"\nnamespace = "demo"\nroot = "{docs.as_posix()}"\n\n[scope.search]\ndatabase_url_env = "MDR_TEST_MISSING_DATABASE_URL"\nschema = "mdr_demo"\nvector_dimensions = 3\nrepresentation_revision = "fixture-v1"\n''',
         encoding="utf-8",
     )
     return config
