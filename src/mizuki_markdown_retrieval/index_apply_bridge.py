@@ -13,6 +13,8 @@ def build_index_apply_plan(
     *,
     namespace: str,
     revision: Mapping[str, str],
+    expected_generation: str | None = None,
+    resulting_generation: str | None = None,
     toolkit: Any | None = None,
 ) -> Any:
     """Map a Markdown IndexPlan to the shared atomic index-apply contract.
@@ -21,6 +23,10 @@ def build_index_apply_plan(
     search representations without changing Markdown bytes, for example the
     embedding model/profile and persistent provider revision. The mapping is
     included in the deterministic apply_id.
+
+    When ``resulting_generation`` is supplied, the expected/resulting generation
+    pair is carried as provider metadata so a durable backend can CAS-fence a
+    prepared plan against concurrent writers.
     """
 
     if not namespace.strip():
@@ -111,15 +117,22 @@ def build_index_apply_plan(
         revision=normalized_revision,
         mutations=digest_mutations,
     )
+    metadata: dict[str, object] = {
+        "adapter": "mizuki-markdown-retrieval",
+        "revision": normalized_revision,
+        "changed_documents": len(mutations),
+    }
+    if resulting_generation is not None:
+        if not resulting_generation.strip():
+            raise ValueError("resulting_generation must not be blank")
+        metadata["expected_generation"] = expected_generation
+        metadata["resulting_generation"] = resulting_generation
+
     return contracts.IndexApplyPlan(
         apply_id=apply_id,
         namespace=namespace,
         mutations=tuple(mutations),
-        metadata={
-            "adapter": "mizuki-markdown-retrieval",
-            "revision": normalized_revision,
-            "changed_documents": len(mutations),
-        },
+        metadata=metadata,
     )
 
 
