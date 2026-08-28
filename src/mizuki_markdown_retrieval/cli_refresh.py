@@ -4,9 +4,13 @@ import json
 from typing import Any, Mapping
 
 from .indexing import DocumentSnapshot
+from .postgres_runtime import (
+    database_url_from_env,
+    open_postgres_apply_provider,
+    preflight_postgres_index,
+)
 from .project_config import ProjectConfigError, RuntimeScope
-from .refresh import RefreshPlan, apply_refresh, prepare_refresh
-from .sqlite_runtime import open_sqlite_apply_provider, preflight_sqlite_index
+from .refresh import apply_refresh, prepare_refresh
 
 
 class DurableIndexDriftError(RuntimeError):
@@ -19,7 +23,7 @@ def run_refresh_command(
     json_output: bool = False,
     toolkit: Any | None = None,
 ) -> int:
-    """Build/apply one durable index refresh from the configured scope runtime."""
+    """Build/apply one durable pgvector index refresh from the configured scope."""
 
     search = runtime.search
     if search is None:
@@ -28,6 +32,7 @@ def run_refresh_command(
         raise ProjectConfigError(
             f"scope {runtime.name} requires search.model_path for index refresh"
         )
+    database_url = database_url_from_env(search.database_url_env)
 
     refresh = prepare_refresh(
         runtime.scope,
@@ -39,8 +44,10 @@ def run_refresh_command(
 
     baseline_revision = _baseline_provider_revision(refresh.baseline_snapshots)
     if baseline_revision is not None:
-        preflight = preflight_sqlite_index(
-            search.database_path,
+        preflight = preflight_postgres_index(
+            database_url,
+            schema=search.schema,
+            vector_dimensions=search.vector_dimensions,
             namespace=refresh.namespace,
             representation_revision=baseline_revision,
             snapshots=refresh.baseline_snapshots,
@@ -63,8 +70,10 @@ def run_refresh_command(
 
     provider = None
     if refresh.changed_count:
-        provider = open_sqlite_apply_provider(
-            search.database_path,
+        provider = open_postgres_apply_provider(
+            database_url,
+            schema=search.schema,
+            vector_dimensions=search.vector_dimensions,
             representation_revision=search.representation_revision,
             model_path=search.model_path,
             device=search.device,
