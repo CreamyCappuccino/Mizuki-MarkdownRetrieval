@@ -15,7 +15,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from .mcp_http_gate import install_authenticated_readiness_gate
-from .mcp_readiness import safe_check_readiness as check_readiness
+from .mcp_readiness import safe_check_readiness
 from .mcp_server import build_server
 from .remote_auth import RemoteOAuthConfig, SharedOAuthJWTVerifier
 
@@ -26,7 +26,7 @@ class RemoteHttpSettings:
     resource_url: str
     required_scope: str
     host: str = "127.0.0.1"
-    port: int = 4440
+    port: int = 7010
     mcp_path: str = "/mcp"
     max_request_body_size: int = 65_536
     max_concurrent_requests: int = 32
@@ -64,7 +64,7 @@ class RemoteHttpSettings:
         oauth: RemoteOAuthConfig,
         *,
         host: str = "127.0.0.1",
-        port: int = 4440,
+        port: int = 7010,
         max_request_body_size: int = 65_536,
         max_concurrent_requests: int = 32,
     ) -> "RemoteHttpSettings":
@@ -138,7 +138,7 @@ def build_http_server(
 
     @server.custom_route("/ready", methods=["GET"])
     async def ready(_: Request) -> JSONResponse:
-        report = check_readiness(config_path, toolkit=toolkit)
+        report = safe_check_readiness(config_path, toolkit=toolkit)
         return JSONResponse(
             report.payload(),
             status_code=200 if report.ready else 503,
@@ -180,7 +180,7 @@ def build_http_app(
     install_authenticated_readiness_gate(
         app,
         mcp_path=settings.mcp_path,
-        probe=lambda: check_readiness(config_path, toolkit=toolkit),
+        probe=lambda: safe_check_readiness(config_path, toolkit=toolkit),
     )
     return server, app
 
@@ -190,7 +190,7 @@ def build_shared_oauth_http_server(
     *,
     oauth: RemoteOAuthConfig,
     host: str = "127.0.0.1",
-    port: int = 4440,
+    port: int = 7010,
     max_request_body_size: int = 65_536,
     max_concurrent_requests: int = 32,
     jwk_client=None,
@@ -222,7 +222,7 @@ def build_shared_oauth_http_app(
     *,
     oauth: RemoteOAuthConfig,
     host: str = "127.0.0.1",
-    port: int = 4440,
+    port: int = 7010,
     max_request_body_size: int = 65_536,
     max_concurrent_requests: int = 32,
     jwk_client=None,
