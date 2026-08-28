@@ -23,6 +23,24 @@ def _config(tmp_path: Path) -> Path:
     return config
 
 
+def _assert_sanitized_provider_failure(result) -> None:
+    assert result.is_error is False
+    assert result.structured_content is not None
+    assert result.structured_content["items"] == []
+    error = result.structured_content["error"]
+    assert error == {
+        "code": "provider_unavailable",
+        "message": "configured search backend is unavailable",
+        "details": {},
+    }
+    rendered = "\n".join(
+        item.text for item in result.content if isinstance(item, TextContent)
+    )
+    assert "provider_unavailable" in rendered
+    assert "MDR_TEST_MISSING_DATABASE_URL" not in rendered
+    assert "mdr_demo" not in rendered
+
+
 def test_in_memory_mcp_client_accepts_read_only_surface_and_missing_db_fails_closed(
     tmp_path: Path,
 ) -> None:
@@ -81,8 +99,7 @@ def test_in_memory_mcp_client_accepts_read_only_surface_and_missing_db_fails_clo
                     "top_k": 1,
                 },
             )
-            assert missing.is_error is True
-            assert missing.structured_content is None
+            _assert_sanitized_provider_failure(missing)
 
     asyncio.run(scenario())
 
@@ -143,6 +160,6 @@ def test_stdio_mcp_client_launches_real_server_process_and_reads_safely(tmp_path
                     "top_k": 1,
                 },
             )
-            assert missing.is_error is True
+            _assert_sanitized_provider_failure(missing)
 
     asyncio.run(scenario())
