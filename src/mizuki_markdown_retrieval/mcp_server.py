@@ -86,7 +86,8 @@ def build_server(
         description=(
             "Find indexed Markdown documents related to a current source chunk. Select the "
             "source with either path+line or document_id+chunk_id. Search uses the scope's "
-            "configured read-only SQLite index and never creates or mutates the index."
+            "configured read-only PostgreSQL/pgvector index and never creates or mutates "
+            "the index."
         ),
         annotations=READ_ONLY_LOCAL,
         meta=security_meta,
