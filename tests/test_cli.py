@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -96,43 +95,51 @@ def test_cli_read_full_plain(tmp_path: Path, capsys) -> None:
     assert "three" in output
 
 
-def _related_result() -> SimpleNamespace:
-    document_ref = SimpleNamespace(
-        document_id="doc-signal",
-        source_version="v2",
-        metadata={"path": "signal.md"},
-    )
-    chunk = SimpleNamespace(
-        chunk_id="chunk-signal",
-        metadata={
-            "path": "signal.md",
-            "heading_path": ["Signals", "Risk"],
-            "line_start": 10,
-            "line_end": 14,
+def _search_payload() -> dict[str, object]:
+    return {
+        "scope": "demo",
+        "namespace": "demo",
+        "source": {
+            "document_id": "doc-rules",
+            "chunk_id": "chunk-rules",
+            "path": "rules.md",
+            "heading_path": ["Rules"],
+            "line_start": 1,
+            "line_end": 4,
         },
-    )
-    hit = SimpleNamespace(chunk=chunk, score=0.91)
-    group = SimpleNamespace(document_ref=document_ref, best_hit=hit)
-    return SimpleNamespace(items=(group,), error=None)
+        "error": None,
+        "items": [
+            {
+                "document_id": "doc-signal",
+                "source_version": "v2",
+                "chunk_id": "chunk-signal",
+                "path": "signal.md",
+                "heading_path": ["Signals", "Risk"],
+                "line_start": 10,
+                "line_end": 14,
+                "score": 0.91,
+            }
+        ],
+    }
+
+
+def _fake_search_service(monkeypatch: pytest.MonkeyPatch, captured: dict[str, object]) -> None:
+    class FakeService:
+        def __init__(self, project):
+            captured["project"] = project
+
+        def search_related(self, scope_name: str, **kwargs):
+            captured["scope"] = scope_name
+            captured["kwargs"] = kwargs
+            return _search_payload()
+
+    monkeypatch.setattr(cli, "ReadOnlyRetrievalService", FakeService)
 
 
 def test_cli_search_literal_by_path_json(tmp_path: Path, capsys, monkeypatch) -> None:
     config = _config(tmp_path)
     captured: dict[str, object] = {}
-    persistent = object()
-
-    def fake_open(database_path, **kwargs):
-        captured["database"] = database_path
-        captured.update(kwargs)
-        return persistent
-
-    def fake_related(source, **kwargs):
-        captured["source"] = source
-        captured["related_kwargs"] = kwargs
-        return _related_result()
-
-    monkeypatch.setattr(cli, "open_sqlite_search_provider", fake_open)
-    monkeypatch.setattr(cli, "related_for_chunk", fake_related)
+    _fake_search_service(monkeypatch, captured)
 
     assert (
         main(
@@ -141,10 +148,6 @@ def test_cli_search_literal_by_path_json(tmp_path: Path, capsys, monkeypatch) ->
                 str(config),
                 "search",
                 "demo",
-                "--database",
-                "local/index.sqlite3",
-                "--representation-revision",
-                "fixture-v1",
                 "--mode",
                 "literal",
                 "--path",
@@ -167,21 +170,22 @@ def test_cli_search_literal_by_path_json(tmp_path: Path, capsys, monkeypatch) ->
     assert payload["items"][0]["path"] == "signal.md"
     assert payload["items"][0]["heading_path"] == ["Signals", "Risk"]
     assert payload["items"][0]["score"] == 0.91
-    assert captured["database"] == (tmp_path / "local/index.sqlite3").resolve()
-    assert captured["mode"] == "literal"
-    assert captured["representation_revision"] == "fixture-v1"
-    assert captured["related_kwargs"] == {
-        "index_provider": persistent,
+    assert captured["scope"] == "demo"
+    assert captured["kwargs"] == {
         "mode": "literal",
         "top_k": 2,
-        "operator_context": {"candidate_k": 7},
+        "candidate_k": 7,
+        "path": "rules.md",
+        "line": 3,
+        "document_id": None,
+        "chunk_id": None,
     }
 
 
 def test_cli_search_plain_output_is_compact(tmp_path: Path, capsys, monkeypatch) -> None:
     config = _config(tmp_path)
-    monkeypatch.setattr(cli, "open_sqlite_search_provider", lambda *args, **kwargs: object())
-    monkeypatch.setattr(cli, "related_for_chunk", lambda *args, **kwargs: _related_result())
+    captured: dict[str, object] = {}
+    _fake_search_service(monkeypatch, captured)
 
     assert (
         main(
@@ -190,10 +194,6 @@ def test_cli_search_plain_output_is_compact(tmp_path: Path, capsys, monkeypatch)
                 str(config),
                 "search",
                 "demo",
-                "--database",
-                "index.sqlite3",
-                "--representation-revision",
-                "fixture-v1",
                 "--mode",
                 "literal",
                 "--path",
@@ -218,10 +218,6 @@ def test_cli_search_requires_complete_single_selector(tmp_path: Path) -> None:
         str(config),
         "search",
         "demo",
-        "--database",
-        "index.sqlite3",
-        "--representation-revision",
-        "fixture-v1",
         "--mode",
         "literal",
     ]
@@ -244,7 +240,7 @@ def test_cli_search_requires_complete_single_selector(tmp_path: Path) -> None:
         )
 
 
-def test_cli_semantic_search_requires_model_path(tmp_path: Path) -> None:
+def test_cli_search_rejects_runtime_override_flags(tmp_path: Path) -> None:
     config = _config(tmp_path)
     with pytest.raises(SystemExit):
         main(
@@ -253,15 +249,13 @@ def test_cli_semantic_search_requires_model_path(tmp_path: Path) -> None:
                 str(config),
                 "search",
                 "demo",
-                "--database",
-                "index.sqlite3",
-                "--representation-revision",
-                "fixture-v1",
                 "--mode",
-                "semantic",
+                "literal",
                 "--path",
                 "rules.md",
                 "--line",
                 "2",
+                "--database",
+                "other.sqlite3",
             ]
         )
