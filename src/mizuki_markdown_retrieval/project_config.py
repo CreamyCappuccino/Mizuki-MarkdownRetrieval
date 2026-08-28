@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -7,6 +8,8 @@ from typing import Mapping
 
 from .chunking import CHUNK_PROFILES
 from .config import FolderOverride, FolderPolicy, ScopeConfig, ScopeMode
+
+_SCHEMA_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class ProjectConfigError(ValueError):
@@ -131,7 +134,7 @@ def _parse_search_runtime(
 
     database_url_env = _required_text(raw, "database_url_env")
     schema = _required_text(raw, "schema")
-    if not _is_simple_postgres_identifier(schema):
+    if not _SCHEMA_RE.fullmatch(schema):
         raise ProjectConfigError(
             f"schema for {scope_name} must be a simple PostgreSQL identifier"
         )
@@ -207,12 +210,6 @@ def _string_tuple(value: object, field_name: str) -> tuple[str, ...]:
     if isinstance(value, tuple) and all(isinstance(item, str) for item in value):
         return value
     raise ProjectConfigError(f"{field_name} must be a string array")
-
-
-def _is_simple_postgres_identifier(value: str) -> bool:
-    if not value or not (value[0].isalpha() or value[0] == "_"):
-        return False
-    return all(char.isalnum() or char == "_" for char in value)
 
 
 def _resolve_path(base_dir: Path, value: str) -> Path:
