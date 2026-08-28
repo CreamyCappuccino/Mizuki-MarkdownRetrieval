@@ -67,6 +67,7 @@ def test_readiness_gate_runs_after_auth_and_scope_but_before_mcp_dispatch(
         issuer_url="https://oauth.example.test",
         resource_url=RESOURCE,
         required_scope="markdown:read",
+        readiness_cache_ttl_seconds=0.1,
     )
     server, app = build_http_app(
         _config(tmp_path),
@@ -104,6 +105,7 @@ def test_readiness_gate_runs_after_auth_and_scope_but_before_mcp_dispatch(
                 }
 
             state["ready"] = True
+            await asyncio.sleep(0.11)
             async with httpx2.AsyncClient(
                 transport=transport,
                 base_url="https://mdr.test",
@@ -120,3 +122,53 @@ def test_readiness_gate_runs_after_auth_and_scope_but_before_mcp_dispatch(
                     assert result.structured_content["items"][0]["scope"] == "demo"
 
     asyncio.run(scenario())
+
+
+def test_hung_readiness_is_bounded_and_single_flight_after_authorization(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    calls = 0
+
+    def hung_probe(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        import time
+        time.sleep(0.3)
+        return ReadinessReport(True, 1, ())
+
+    monkeypatch.setattr(mcp_http, "safe_check_readiness", hung_probe)
+    settings = RemoteHttpSettings(
+        issuer_url="https://oauth.example.test",
+        resource_url=RESOURCE,
+        required_scope="markdown:read",
+        readiness_timeout_seconds=0.1,
+        readiness_cache_ttl_seconds=0.2,
+        request_timeout_seconds=0.5,
+    )
+    server, app = build_http_app(
+        _config(tmp_path),
+        token_verifier=StaticVerifier(),
+        settings=settings,
+    )
+
+    async def scenario() -> None:
+        transport = httpx2.ASGITransport(app=app)
+        async with server.session_manager.run():
+            async with httpx2.AsyncClient(
+                transport=transport,
+                base_url="https://mdr.test",
+                headers={"Authorization": "Bearer good"},
+            ) as http:
+                responses = await asyncio.gather(
+                    http.post("/mcp", json={}),
+                    http.post("/mcp", json={}),
+                )
+        for response in responses:
+            assert response.status_code == 503
+            assert response.json()["issues"] == [
+                {"scope": "*", "reason": "readiness_probe_timeout"}
+            ]
+
+    asyncio.run(scenario())
+    assert calls == 1
