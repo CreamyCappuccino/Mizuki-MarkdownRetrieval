@@ -1,25 +1,15 @@
-# Shared OAuth / public MCP formal application packet
+# MDR Shared OAuth application packet
 
-Status: **formal pre-publication application — read-only audit and planning are authorized; Cloudflare, DNS, Shared OAuth registry, tunnel, launchd, and public-route mutation remain prohibited until a separate explicit user GO.**
+Date: 2026-08-29  
+Application: Mizuki Markdown Retrieval (MDR)  
+Target: public read-only MCP resource through StrangeBasket Shared OAuth  
+Current gate: **publication-owner audit / exact local binding still required before production mutation**
 
-This packet supersedes `docs/shared_oauth_application_draft.md` as the current MM255 application input. The draft is retained for history.
+## 1. Scope of this packet
 
-## 1. Service identity
+This packet carries the accepted MDR application design into the existing MM255 / Shared OAuth / Cloudflare publication process.
 
-- Service: **Mizuki Markdown Retrieval**
-- Abbreviation: **MDR**
-- Repository: `CreamyCappuccino/Mizuki-MarkdownRetrieval`
-- Public role: read-only Markdown retrieval for configured project scopes
-- Initial public acceptance client: ChatGPT
-
-Public MCP tools remain exactly:
-
-1. `list_markdown_scopes`
-2. `list_markdown_files`
-3. `search_related_markdown`
-4. `read_markdown`
-
-Durable index refresh remains an operator-owned CLI mutation and is not exposed through MCP.
+It does **not** authorize external mutation by itself. It exists so the publication owner can resolve exact deployment bindings, collision checks, and the final GO checklist without reopening the MDR protocol or security design.
 
 ## 2. Accepted and current review baselines
 
@@ -36,22 +26,27 @@ Evidence:
 - `docs/remote_http_oauth_acceptance_receipt.md`
 - GitHub Actions Run #150: SUCCESS
 
-The application retrieval backend was subsequently migrated from MDR-local SQLite to PostgreSQL + pgvector. That storage/runtime migration is a separate review slice and does not reopen the accepted HTTP/OAuth security design. Its first green migration checkpoint was `0b33e87da79c228e7d9d699d3e3b70dd56011a76` / Run #176. P1 concurrency/fencing and integration-hardening work after that checkpoint is under reacceptance; use the latest accepted PG SHA once that review closes.
+The application retrieval backend was subsequently migrated from MDR-local SQLite to PostgreSQL + pgvector. That storage/runtime migration is a separate review slice and does not reopen the accepted HTTP/OAuth security design. Its first green migration checkpoint was `0b33e87da79c228e7d9d699d3e3b70dd56011a76` / Run #176.
+
+The PostgreSQL/pgvector reacceptance is now **ACCEPT / CLOSED** for the application/storage contract at MDR `f9e1bdb4b14e72c35cd1e7594d4436b380a07fae`, paired with SearchE/Toolkit `d1c7982e93bae9751f215834995c3fddfe3ea824`. The provider-generation fencing lineage includes SearchE `d35b88754f8b6c84b1a473ab12d61f1abc3c5dab`. The private SearchE workflow `MDR Real PG MCP Integration` Run `33223800327` checked out the exact MDR SHA, used `pgvector/pgvector:0.8.6-pg16`, and passed the real pgvector MCP Client acceptance. See `docs/postgres_pgvector_reacceptance_receipt.md`.
+
+This closes the PG implementation reacceptance only. Production M1 filesystem/env binding, installed service receipt, production generation build, Cloudflare, Shared OAuth registry, DNS, and public connector acceptance remain separate deployment gates.
 
 ## 3. Proposed v1 deployment posture
 
 Current v1 posture:
 
-- **serving/source runtime candidate: M4**
-- Markdown bounded reads and Ruri execution remain local to that serving runtime
-- **PostgreSQL/pgvector DB host is not yet fixed**
-- automatic runtime failover: **none for v1**
+- **active serving/runtime + PostgreSQL/pgvector writer/index authority: M1**
+- **source authoring + read-only standby: M4**
+- approved Markdown source/config/code are synchronized M4 -> M1 for the active runtime
+- verified DB/index generation may be mirrored M1 -> M4 for standby/recovery
+- automatic runtime/authority failover: **none for v1**; any failover/failback is explicit
 - failure behavior: **fail closed**
 - public resource server: read-only
 - refresh writer: exactly one operator-owned workflow per scope, with local cross-process serialization and provider-side generation fencing
 - no silent stale-replica routing
 
-The database connection is selected through each scope's `database_url_env`. PostgreSQL therefore may be deployed as M4-local or on M1 reachable from M4 (for example over the existing private/Tailscale path) without changing MDR application code. PostgreSQL migration must not be interpreted as an M1 or M4 authority decision.
+This is the current deployment decision, not an application hard-code. MDR still selects the database connection only through each scope's owner-controlled `database_url_env`, so the code preserves deployment indirection. Boundary 1 must bind the exact M1 paths, environment, source synchronization, and runtime installation without copying secrets into Git.
 
 ## 4. Canonical public resource
 
@@ -125,7 +120,7 @@ The Resource Server already accepts the local contract for:
 - known-key fast path
 - 401 / 403 / readiness 503 / MCP-dispatch ordering
 
-Do not introduce an independent authorization server or custom OAuth protocol layer in MDR.
+Do not introduce an independent authorization server inside MDR.
 
 ## 7. Source / derived-index authority
 
@@ -133,10 +128,12 @@ Required invariant:
 
 > Markdown remains canonical. PostgreSQL/pgvector index rows and local state are derived/rebuildable retrieval generation data. Only an operator-owned refresh workflow may advance one scope generation, and public MCP remains read-only.
 
-The serving/source runtime and the PostgreSQL host are separate deployment decisions:
+The application keeps serving/runtime and PostgreSQL location independently configurable, while the current v1 deployment decision binds both active roles to M1:
 
-- Markdown source roots, bounded file reads, runtime config, Ruri model/cache, local refresh state, and MCP process are expected on the selected serving/source host (currently M4 candidate).
-- PostgreSQL/pgvector may be local to that host or remote on M1. The TOML contains only an environment-variable name (`database_url_env`), never a database URL or secret.
+- M1 is the active serving/runtime host and PostgreSQL/pgvector writer/index authority.
+- M4 remains the Markdown source-authoring host and read-only standby. Only approved source/config/code should cross M4 -> M1; standby/recovery artifacts may cross M1 -> M4 after verification.
+- The M1 runtime must have bounded access to the approved Markdown roots, runtime config, Ruri model/cache, local refresh state, and MCP process state.
+- The TOML contains only an environment-variable name (`database_url_env`), never a database URL or secret.
 - a prepared refresh carries deterministic expected/resulting generation tokens;
 - local refresh is serialized across processes for planning -> durable preflight -> apply -> state commit;
 - the shared PostgreSQL provider must namespace-lock and reject stale expected generations before mutation;
@@ -189,7 +186,7 @@ public route:  com.codex.mdr.cloudflare-public
 Candidate dedicated Tunnel name:
 
 ```text
-mdr-m4
+mdr-m1
 ```
 
 These names remain candidates until account/local collision readback immediately before mutation.
@@ -212,15 +209,15 @@ The eventual deployment receipt must record the installed MDR release SHA, pinne
 
 The MM255/Cloudflare owner is authorized to perform **read-only inspection and planning only** until explicit GO:
 
-1. confirm M4 remains the appropriate serving/source runtime host;
-2. separately determine whether v1 PostgreSQL should be M4-local or M1-hosted/private-reachable; do not infer this from the runtime host;
-3. probe whether local port `7010` is free;
+1. confirm M1 as the active serving/runtime host and PostgreSQL/pgvector writer/index authority, with M4 as source-authoring/read-only standby;
+2. identify the exact approved M4 -> M1 Markdown/config/code synchronization boundary and verify no implicit authority switch exists;
+3. probe whether local port `7010` is free on M1;
 4. verify `mdr.strangebasket.com` has no DNS/tunnel/application collision;
 5. inspect existing Shared OAuth resource/scope registry naming for conflicts;
-6. identify exact serving-host config/env/data/state/runtime paths without exposing secrets;
-7. identify the correct launchd/Ops/tunnel naming and lifecycle pattern;
-8. verify the locked refresh writer plus provider-generation fence, with no accidental stale-replica path;
-9. prepare exact rollback scope for MDR only;
+6. identify exact M1 config/env/data/state/runtime paths without exposing secrets;
+7. identify the correct M1 launchd/Ops/tunnel naming and lifecycle pattern;
+8. verify the locked refresh writer plus provider-generation fence, with no accidental M4 writer or stale-replica path;
+9. prepare exact rollback scope for MDR only, including explicit authority failback rules if M1 must be taken out of service;
 10. return the final mutation plan and compact GO checklist.
 
 This audit may revise candidate paths/labels when live infrastructure gives a better answer. It must not change the protocol/tool/read-only contract without returning the issue for review.
@@ -257,34 +254,32 @@ After GO and publication mutation, acceptance must include at least:
 - safe live literal/semantic/hybrid search and bounded read;
 - real ChatGPT OAuth login/consent/tool call;
 - service restart + client reconnect;
-- readiness/fail-closed behavior through the canonical route;
-- log audit proving bearer tokens/secrets/DB URLs are not emitted;
-- rollback/smoke receipt.
-
-The signing-key positive cache TTL / JWKS staleness budget must be recorded in the public deployment receipt (current local default: 300 seconds).
+- readiness/fail-closed behavior under source/state/index drift;
+- operator refresh smoke with generation advance and no concurrent writer;
+- rollback proof limited to MDR resources only.
 
 ## 13. Current A-G decision state
 
 | ID | Decision | v1 application value | Status before mutation |
 |---|---|---|---|
-| A | Serving/source machine | M4 candidate, no auto runtime failover | live host audit passed previously; recheck before install |
+| A | Serving/runtime + standby topology | M1 active serving/runtime; M1 PostgreSQL/pgvector writer/index authority; M4 source authoring + read-only standby; explicit failover only | deployment decision accepted; live M1 binding/receipt pending |
 | B | Canonical hostname | `mdr.strangebasket.com` | collision-free in prior audit; account readback required before mutation |
-| C | Loopback port | `7010` | user selected; prior live probe clear |
-| D | Owner config/env paths | serving-host owner-only paths; DB URL via env indirection | exact production paths pending |
-| E | Data/index authority | Markdown canonical; PostgreSQL/pgvector derived generation; DB host M1/M4 undecided; one fenced refresh writer | PG migration reacceptance pending |
+| C | Loopback port | `7010` | user selected; prior live probe clear; recheck on M1 before install |
+| D | Owner config/env paths | M1 owner-only paths; DB URL via env indirection; approved M4 -> M1 source/config sync | exact production paths and sync binding pending |
+| E | Data/index authority | Markdown canonical; M1 PostgreSQL/pgvector derived generation; one fenced refresh writer | **ACCEPT** at MDR `f9e1bdb4...` + SearchE `d1c7982e...`; real PG MCP workflow Run `33223800327` SUCCESS |
 | F | Availability/freshness | fail closed, no silent stale runtime/DB fallback | application posture accepted |
-| G | Runtime/lifecycle | dedicated MDR runtime + existing Ops/launchd conventions | installed remote entrypoint/runtime receipt still pending |
+| G | Runtime/lifecycle | installed `mizuki-mdr-remote` launcher + existing Ops/launchd conventions | launcher implementation accepted; live M1 installation/runtime receipt pending |
 
 ## 14. Expected response from publication owner
 
 Please return:
 
 1. audit verdict: `READY_FOR_GO`, `HOLD`, or `BLOCKED`;
-2. resolved A-G values, explicitly separating serving/source host from PostgreSQL host;
+2. resolved A-G values, explicitly recording M1 active authority/runtime and M4 source-authoring/read-only standby;
 3. any collision/security finding;
 4. exact mutation sequence in dependency order;
 5. exact rollback sequence;
 6. the minimal explicit GO wording required from the user;
 7. whether any step must be split into a separate approval boundary.
 
-Until local PG reacceptance, this response, and subsequent user GO, this packet authorizes **no production/external mutation**.
+Until the live M1 binding/runtime receipt, this response, and subsequent user GO, this packet authorizes **no production/external mutation**.
