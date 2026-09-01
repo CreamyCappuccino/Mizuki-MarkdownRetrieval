@@ -1,8 +1,17 @@
 # Public Streamable HTTP / OAuth publication gate
 
-Status: design gate only. The accepted local MCP v0 remains stdio-only and read-only.
+Status: publication gate. Local read-only MCP is accepted over stdio and loopback Streamable HTTP; the public endpoint remains disabled pending production-binding and publication acceptance.
 
 This document defines the conditions that must be satisfied before Mizuki Markdown Retrieval is exposed as a public Streamable HTTP MCP endpoint. It is intentionally separate from the local MCP v0 contract and from the CLI-only durable index mutation route.
+
+
+## Current pre-publication deployment state
+
+The active deployment candidate is M1 serving/runtime + PostgreSQL/pgvector writer/index authority, with M4 as source-authoring/read-only standby and no automatic failover. M1 loopback `127.0.0.1:7010` has been observed listening with `/health` OK, `/ready` 200, and launchd label `com.codex.mdr.remote`.
+
+The current SearchE production candidate is `7be04662679548bce24603978a15bedfdcb3f019` with wheel SHA-256 `ac2ce5e022f15665c0b8800bee22c30f7c92b392a79968379a903abf1af6fcac`. Publication remains HOLD until M1 replaces the earlier installed `d1c7982...` wheel and a corrected delta receipt re-runs local acceptance.
+
+The initial public retrieval universe is intentionally bounded to the `codex-environment` scope, root-level Markdown only, currently 25 files. The 2261-file M4→M1 mirror count is a synchronization inventory, **not** the v1 public indexed universe. Large project scopes remain HOLD until bounded batched embedding is implemented and accepted.
 
 ## Boundary to preserve
 
