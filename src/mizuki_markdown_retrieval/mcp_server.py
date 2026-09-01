@@ -10,7 +10,7 @@ from mcp.server.auth.settings import AuthSettings
 from mcp.types import CallToolResult, ToolAnnotations
 from pydantic import Field
 
-from .mcp_output import format_files, format_read, format_scopes, format_search, tool_result
+from .mcp_output import ResponseFormat, format_files, format_read, format_scopes, format_search, tool_result
 from .mcp_service import ReadOnlyRetrievalService
 
 READ_ONLY_LOCAL = ToolAnnotations(
@@ -61,9 +61,13 @@ def build_server(
     )
     def list_markdown_scopes(
         limit: Annotated[int, Field(ge=1, le=100)] = 50,
+        response_format: Annotated[
+            ResponseFormat,
+            Field(description="compact is token-efficient default; use json only for exact structured metadata."),
+        ] = "compact",
     ) -> CallToolResult:
         payload = service.list_scopes(limit=limit)
-        return tool_result(payload, format_scopes(payload))
+        return tool_result(payload, format_scopes(payload), response_format=response_format)
 
     @mcp.tool(
         title="List Markdown files",
@@ -77,9 +81,13 @@ def build_server(
     def list_markdown_files(
         scope: Annotated[str, Field(min_length=1, max_length=128)],
         limit: Annotated[int, Field(ge=1, le=500)] = 100,
+        response_format: Annotated[
+            ResponseFormat,
+            Field(description="compact is token-efficient default; use json only for exact structured metadata."),
+        ] = "compact",
     ) -> CallToolResult:
         payload = service.list_files(scope, limit=limit)
-        return tool_result(payload, format_files(payload))
+        return tool_result(payload, format_files(payload), response_format=response_format)
 
     @mcp.tool(
         title="Search related Markdown",
@@ -101,6 +109,10 @@ def build_server(
         line: Annotated[int | None, Field(ge=1)] = None,
         document_id: Annotated[str | None, Field(min_length=1, max_length=256)] = None,
         chunk_id: Annotated[str | None, Field(min_length=1, max_length=256)] = None,
+        response_format: Annotated[
+            ResponseFormat,
+            Field(description="compact omits internal IDs/hashes; use json only when exact structured metadata is needed."),
+        ] = "compact",
     ) -> CallToolResult:
         payload = service.search_related(
             scope,
@@ -112,7 +124,11 @@ def build_server(
             document_id=document_id,
             chunk_id=chunk_id,
         )
-        return tool_result(payload, format_search(payload, mode=mode))
+        return tool_result(
+            payload,
+            format_search(payload, mode=mode),
+            response_format=response_format,
+        )
 
     @mcp.tool(
         title="Read Markdown",
@@ -142,6 +158,10 @@ def build_server(
         ] = None,
         context_lines: Annotated[int, Field(ge=0, le=100)] = 20,
         max_chars: Annotated[int, Field(ge=1, le=50_000)] = 50_000,
+        response_format: Annotated[
+            ResponseFormat,
+            Field(description="compact is token-efficient default; use json only for exact structured metadata."),
+        ] = "compact",
     ) -> CallToolResult:
         payload = service.read(
             scope,
@@ -152,7 +172,7 @@ def build_server(
             context_lines=context_lines,
             max_chars=max_chars,
         )
-        return tool_result(payload, format_read(payload))
+        return tool_result(payload, format_read(payload), response_format=response_format)
 
     return mcp
 
