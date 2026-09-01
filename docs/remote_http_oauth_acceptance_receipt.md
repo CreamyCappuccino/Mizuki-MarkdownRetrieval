@@ -102,8 +102,8 @@ Final review evidence reported by Codex:
 
 The local Remote HTTP/OAuth implementation is accepted, and the deployment topology has since moved to **M1 active serving/runtime + PostgreSQL/pgvector writer/index authority**, with **M4 source authoring + read-only standby**. The remaining work is a separate **public publication gate**:
 
-- finalize the M1 runtime delta receipt with the current SearchE production candidate (`7be0466...`) and exact wheel hash;
-- record exact non-secret M1 config/env/source/state/Ops paths and accepted generation/schema;
+- M1 SearchE production-pin delta acceptance is **CLOSED**; receipt: `/Users/ushio/DevSpace/Ops/MDR/mdr-m1-searche-pin-delta-receipt-2026-09-01.md`;
+- exact non-secret M1 config/env/source/state/Ops paths and accepted generation/schema are recorded in the M1 receipts and must be carried into the publication packet authority section;
 - keep the v1 public candidate bounded to `codex-environment` root-level Markdown (25 files); larger project scopes remain HOLD until bounded batched embedding exists;
 - Shared OAuth resource/scope registry entry;
 - real Shared AS token issuance and JWKS rotation behavior for the MDR resource;
