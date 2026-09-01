@@ -140,6 +140,7 @@ def test_real_pgvector_index_through_mcp_client_literal_semantic_hybrid_and_read
                             "path": "source.md",
                             "line": 3,
                             "top_k": 1,
+                            "response_format": "json",
                         },
                     )
                     assert result.is_error is False, mode
@@ -157,6 +158,7 @@ def test_real_pgvector_index_through_mcp_client_literal_semantic_hybrid_and_read
                         "line_start": 3,
                         "context_lines": 1,
                         "max_chars": 500,
+                        "response_format": "json",
                     },
                 )
                 assert read.is_error is False
