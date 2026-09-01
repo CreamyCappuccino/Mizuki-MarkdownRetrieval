@@ -3,7 +3,7 @@
 Date: 2026-09-01  
 Application: Mizuki Markdown Retrieval (MDR)  
 Target: public read-only MCP resource through StrangeBasket Shared OAuth  
-Current gate: **final publication-owner READY_FOR_GO re-review; M1 local delta acceptance CLOSED**
+Current gate: **M4 authority docs refresh / publication-owner READY_FOR_GO re-review pending**
 
 ## 1. Scope of this packet
 
@@ -44,42 +44,43 @@ The corrected SearchE receipt records:
 
 Historical apply receipts are now checked under the namespace advisory lock against the durable current generation. Only `current == plan.resulting_generation` may return `already_applied`; stale historical receipts fail closed with `PersistentIndexError`. Immediate identical retry still avoids unnecessary embedding recomputation.
 
-This closes the SearchE/PG implementation reacceptance. Production/public publication remains a separate gate. The original non-secret M1 local receipt is `/Users/ushio/DevSpace/Ops/MDR/mdr-m1-local-runtime-receipt-2026-09-01.md`; the corrected SearchE production-pin delta acceptance is **CLOSED** in `/Users/ushio/DevSpace/Ops/MDR/mdr-m1-searche-pin-delta-receipt-2026-09-01.md`.
+This closes the SearchE/PG implementation reacceptance. Production/public publication remains a separate gate. The current authority decision supersedes the earlier M1-active packet state: M4 is now the accepted local-first source/index/refresh/runtime authority and sole writer, while M1 is a verified backup/cold standby. Current receipts are `/Users/ushio/DevSpace/Ops/MDR/mdr-m4-active-acceptance-receipt-2026-09-01.md` and `/Users/ushio/DevSpace/Ops/MDR/mdr-m1-cold-standby-receipt-2026-09-01.md`. Earlier M1 receipts remain historical rollback evidence only.
 
-The corrected M1 runtime now records:
+The accepted M4 runtime now records:
 - installed SearchE source SHA: `7be04662679548bce24603978a15bedfdcb3f019`
 - installed wheel SHA-256: `ac2ce5e022f15665c0b8800bee22c30f7c92b392a79968379a903abf1af6fcac`
 - MDR runtime SHA: `f9e1bdb4b14e72c35cd1e7594d4436b380a07fae`
 - schema: `mdr_codex_environment`
-- generation: `mdr-state-471b370f7550ad67a020e12fdcb7afd62a3fae850d627d1a47529e0ec35d2c23`
-- refresh readback: 25 files, changed 0, unchanged state committed; generation / 255 chunks / 1 apply receipt unchanged
+- M4 PostgreSQL: `17.7`; pgvector: `0.8.1`
+- generation: `mdr-state-4308016b147a54c29ccae7d4c076ea1f4346768a1016c93e08535834069f3504`
+- accepted corpus: 25 root-level Markdown files / 257 chunks
 - stdio: 4 tools + search/read PASS
 - literal / semantic / hybrid: PASS, 3 hits each
 - HTTP: `/health=200`, `/ready=200`, protected-resource metadata `200`, anonymous MCP `401`
 - restart smoke: PASS under launchd `com.codex.mdr.remote`
 - Ops root: `/Users/ushio/DevSpace/Ops/MDR/`
-- origin: `127.0.0.1:7010`
-- M4 receipt commit: `7e0a15b`; paired M1 commit: `2159e41`
-- rollback artifact: prior `d1c7982...` wheel retained locally
+- M4 origin: `127.0.0.1:7010`
+- M4 receipt commit: `00f61da7d9ca8a179c2e81a414b6eca2319fac08`; paired M1 receipt commit: `69ea92534e4ed9a3ebe1ded9668e74e18a45acc0`
+- M1 standby retains separately verified rollback material; current M4 SearchE authority remains `7be0466...`
 - external/public mutation during delta acceptance: **0**
 
-The v1 indexed universe remains `codex-environment` root-level Markdown, 25 files. The 2261-file mirror inventory is not the public/indexed universe; large scopes remain HOLD until bounded batched embedding is implemented and separately accepted. Cloudflare, Shared OAuth registry, DNS, and public connector mutation remain unauthorized until the later explicit user GO.
+The v1 indexed universe remains `codex-environment` root-level Markdown, 25 files / 257 chunks on M4. The historical 2261-file mirror inventory is not the public/indexed universe; large scopes remain HOLD until bounded batched embedding is implemented and separately accepted. Cloudflare, Shared OAuth registry, DNS, and public connector mutation remain unauthorized until the revised M4 packet is re-approved and the user gives the required re-GO.
 
 ## 3. Proposed v1 deployment posture
 
 Current v1 posture:
 
-- **active serving/runtime + PostgreSQL/pgvector writer/index authority: M1**
-- **source authoring + read-only standby: M4**
-- approved Markdown source/config/code are synchronized M4 -> M1 for the active runtime
-- verified DB/index generation may be mirrored M1 -> M4 for standby/recovery
+- **active source/index/refresh/runtime + PostgreSQL/pgvector writer/index authority: M4**
+- **verified backup/cold standby: M1**
+- M4 is canonical source/index/refresh/runtime authority and sole writer
+- M1 is receipt-backed backup/cold standby; service/listener remain off unless an explicit failover gate is executed
 - automatic runtime/authority failover: **none for v1**; any failover/failback is explicit
 - failure behavior: **fail closed**
 - public resource server: read-only
 - refresh writer: exactly one operator-owned workflow per scope, with local cross-process serialization and provider-side generation fencing
 - no silent stale-replica routing
 
-This is the current deployment decision, not an application hard-code. MDR still selects the database connection only through each scope's owner-controlled `database_url_env`, so the code preserves deployment indirection. Boundary 1 local runtime binding is now evidenced by the base M1 receipt plus the corrected SearchE pin delta receipt. Exact non-secret bindings remain receipt-backed; secrets stay owner-only and are not copied into Git.
+This is the current deployment decision, not an application hard-code. MDR still selects the database connection only through each scope's owner-controlled `database_url_env`, so the code preserves deployment indirection. The current local runtime binding is evidenced by the M4 active receipt paired with the M1 cold-standby receipt. Exact non-secret bindings remain receipt-backed; secrets stay owner-only and are not copied into Git.
 
 
 ### v1 public scope boundary
@@ -89,7 +90,7 @@ The initial public candidate is intentionally narrow:
 - scope: `codex-environment`
 - indexed/public retrieval universe: root-level Markdown only
 - current accepted candidate size: **25 files**
-- M4→M1 Markdown mirror inventory: **2261 files**, which is a synchronization count and **not** the public/indexed universe
+- historical mirror inventory: **2261 files**, which is a synchronization count and **not** the public/indexed universe
 - large project scopes: **HOLD** until bounded batched embedding exists and is separately accepted
 
 This distinction must remain explicit in receipts and public documentation so mirror size is never mistaken for authorization or indexing scope.
@@ -130,7 +131,7 @@ Expected local endpoints:
 /.well-known/oauth-protected-resource/mcp
 ```
 
-Before public mutation, perform a live read-only owner probe on M1 and confirm `127.0.0.1:7010` is occupied by the expected MDR listener and that `/health` and `/ready` are healthy. Treat an unexpected owner or unhealthy listener as a conflict; do not require the accepted MDR port to be free.
+Before public mutation, perform a live read-only owner probe on **M4** and confirm `127.0.0.1:7010` is occupied by the expected MDR listener and that `/health` and `/ready` are healthy. Treat an unexpected owner or unhealthy listener as a conflict; do not require the accepted MDR port to be free.
 
 ## 6. Shared OAuth contract
 
@@ -174,11 +175,11 @@ Required invariant:
 
 > Markdown remains canonical. PostgreSQL/pgvector index rows and local state are derived/rebuildable retrieval generation data. Only an operator-owned refresh workflow may advance one scope generation, and public MCP remains read-only.
 
-The application keeps serving/runtime and PostgreSQL location independently configurable, while the current v1 deployment decision binds both active roles to M1:
+The application keeps serving/runtime and PostgreSQL location independently configurable, while the current v1 deployment decision binds active authority to M4:
 
-- M1 is the active serving/runtime host and PostgreSQL/pgvector writer/index authority.
-- M4 remains the Markdown source-authoring host and read-only standby. Only approved source/config/code should cross M4 -> M1; standby/recovery artifacts may cross M1 -> M4 after verification.
-- The M1 runtime must have bounded access to the approved Markdown roots, runtime config, Ruri model/cache, local refresh state, and MCP process state.
+- M4 is the active source/index/refresh/runtime host and PostgreSQL/pgvector writer/index authority; it is the sole writer.
+- M1 is a verified backup/cold standby. Its service/listener remain off during normal operation, with no automatic or silent failover.
+- The M4 runtime must have bounded access to the approved Markdown roots, runtime config, Ruri model/cache, local refresh state, and MCP process state.
 - The TOML contains only an environment-variable name (`database_url_env`), never a database URL or secret.
 - a prepared refresh carries deterministic expected/resulting generation tokens;
 - local refresh is serialized across processes for planning -> durable preflight -> apply -> state commit;
@@ -199,22 +200,19 @@ The PostgreSQL host/connection secret must be resolved through owner-only enviro
 
 ## 8. Owner-only config / runtime audit
 
-Receipt-backed exact M1 paths and modes:
+Current authority is **M4**. Exact host-local config/source/state/runtime/Ops paths and file modes are receipt-backed in the local acceptance receipt:
 
 ```text
-config directory:          /Users/ushio/.config/mizuki-markdown-retrieval/                                  mode 0700
-config TOML:               /Users/ushio/.config/mizuki-markdown-retrieval/markdown-retrieval.toml          mode 0600
-secret-bearing owner env:  /Users/ushio/.config/mizuki-markdown-retrieval/remote.env                       mode 0600
-source root:               /Users/ushio/.local/share/mizuki-markdown-retrieval/source/codex/               mode 0755
-state file:                /Users/ushio/.local/share/mizuki-markdown-retrieval/state/codex-environment.index-state.json mode 0600
-runtime/data root:         /Users/ushio/.local/share/mizuki-markdown-retrieval/                             mode 0755
-installed venv:            /Users/ushio/.local/share/mizuki-markdown-retrieval/venv/                        mode 0755
-Ops root:                  /Users/ushio/DevSpace/Ops/MDR/                                                   mode 0755
-runtime wrapper:           /Users/ushio/DevSpace/Ops/MDR/mdr-runtime-exec.sh                               mode 0755
-launchd plist:             /Users/ushio/Library/LaunchAgents/com.codex.mdr.remote.plist                     mode 0600
+/Users/ushio/DevSpace/Ops/MDR/mdr-m4-active-acceptance-receipt-2026-09-01.md
 ```
 
-Database URL indirection name: `MDR_DATABASE_URL`. Its value is intentionally omitted from Git/Relay/receipts. These paths are receipt-backed M1 authority, not candidates.
+The paired M1 cold-standby receipt is:
+
+```text
+/Users/ushio/DevSpace/Ops/MDR/mdr-m1-cold-standby-receipt-2026-09-01.md
+```
+
+Do not copy secret-bearing owner-env/token values or secret-shelf locations into Git, Relay, MCPMemory, or public receipts. Database URL indirection remains `MDR_DATABASE_URL`; its value is intentionally omitted. Host-local path authority is M4 unless an explicit failover gate changes it.
 
 ## 9. Lifecycle / operations
 
@@ -225,13 +223,13 @@ actual core service:      com.codex.mdr.remote
 candidate public route:  com.codex.mdr.cloudflare-public
 ```
 
-Candidate dedicated Tunnel name:
+Candidate dedicated Tunnel name for the current M4 publication plan:
 
 ```text
-mdr-m1
+mdr-m4
 ```
 
-`com.codex.mdr.remote` is the accepted live M1 core label. Only the public-route label and dedicated Tunnel name remain candidates until account/local collision readback immediately before mutation.
+`com.codex.mdr.remote` is the accepted live M4 core label. Only the public-route label and dedicated Tunnel name remain candidates until M4/account collision readback immediately before mutation.
 
 The final Ops surface should provide an obvious path to:
 
@@ -251,15 +249,15 @@ The eventual deployment receipt must record the installed MDR release SHA, pinne
 
 The MM255/Cloudflare owner is authorized to perform **read-only inspection and planning only** until explicit GO:
 
-1. confirm M1 as the active serving/runtime host and PostgreSQL/pgvector writer/index authority, with M4 as source-authoring/read-only standby;
-2. identify the exact approved M4 -> M1 Markdown/config/code synchronization boundary and verify no implicit authority switch exists;
-3. confirm local port `7010` on M1 is owned by the expected MDR listener and that `/health` and `/ready` remain healthy;
+1. confirm M4 as the active source/index/refresh/runtime host and PostgreSQL/pgvector writer/index authority/sole writer, with M1 as backup/cold standby;
+2. confirm M1 service/listener remain off and that no automatic or silent failover path exists;
+3. confirm local port `7010` on M4 is owned by the expected MDR listener and that `/health` and `/ready` remain healthy;
 4. verify `mdr.strangebasket.com` has no DNS/tunnel/application collision;
 5. inspect existing Shared OAuth resource/scope registry naming for conflicts;
-6. identify exact M1 config/env/data/state/runtime paths without exposing secrets;
-7. identify the correct M1 launchd/Ops/tunnel naming and lifecycle pattern;
-8. verify the locked refresh writer plus provider-generation fence, with no accidental M4 writer or stale-replica path;
-9. prepare exact rollback scope for MDR only, including explicit authority failback rules if M1 must be taken out of service;
+6. verify current M4 host-local config/data/state/runtime authority against the M4 acceptance receipt without exposing secrets;
+7. identify the correct M4 launchd/Ops/tunnel naming and lifecycle pattern;
+8. verify the locked refresh writer plus provider-generation fence, with no accidental M1 writer or stale-replica path;
+9. prepare exact rollback scope for MDR only, keeping M1 as cold standby unless a separate explicit failover gate is opened;
 10. return the final mutation plan and compact GO checklist.
 
 This audit may revise candidate paths/labels when live infrastructure gives a better answer. It must not change the protocol/tool/read-only contract without returning the issue for review.
@@ -304,24 +302,24 @@ After GO and publication mutation, acceptance must include at least:
 
 | ID | Decision | v1 application value | Status before mutation |
 |---|---|---|---|
-| A | Serving/runtime + standby topology | M1 active serving/runtime; M1 PostgreSQL/pgvector writer/index authority; M4 source authoring + read-only standby; explicit failover only | **CLOSED** by base M1 receipt + SearchE pin delta receipt |
+| A | Serving/runtime + standby topology | M4 source/index/refresh/runtime authority + sole writer; M1 verified backup/cold standby; explicit failover only | **CLOSED** by M4 active + M1 cold-standby receipts |
 | B | Canonical hostname | `mdr.strangebasket.com` | collision-free in prior audit; account readback required before mutation |
-| C | Loopback port | `7010` | live M1 listener observed; `/health` OK and `/ready` 200 |
-| D | Owner config/env paths | M1 owner-only paths; DB URL via env indirection; approved M4 -> M1 source/config sync | **CLOSED for pre-publication** by receipt-backed M1 binding; secrets remain owner-only |
-| E | Data/index authority | Markdown canonical; M1 PostgreSQL/pgvector derived generation; one fenced refresh writer; v1 public scope `codex-environment` / 25 root-level Markdown files | **ACCEPT / CLOSED** at MDR `f9e1bdb4...` + installed SearchE `7be0466...`; generation `mdr-state-471b...` |
+| C | Loopback port | `7010` | live M4 listener accepted; local HTTP/readiness/restart smoke PASS |
+| D | Owner config/env paths | M4 host-local receipt-backed authority; DB URL via env indirection; M1 cold standby only | **CLOSED for pre-publication** by M4/M1 paired receipts; secrets remain owner-only |
+| E | Data/index authority | Markdown canonical on M4; M4 PostgreSQL/pgvector derived generation; one fenced refresh writer; v1 public scope `codex-environment` / 25 root-level Markdown files | **ACCEPT / CLOSED** at MDR `f9e1bdb4...` + SearchE `7be0466...`; 257 chunks; generation `mdr-state-4308016b...` |
 | F | Availability/freshness | fail closed, no silent stale runtime/DB fallback; large scopes HOLD until bounded batched embedding | application posture accepted |
-| G | Runtime/lifecycle | `mizuki-mdr-remote`; launchd `com.codex.mdr.remote`; Ops-managed lifecycle | **CLOSED for pre-publication**; restart/smoke PASS, origin `127.0.0.1:7010` |
+| G | Runtime/lifecycle | M4 `mizuki-mdr-remote`; launchd `com.codex.mdr.remote`; Ops-managed lifecycle | **CLOSED for pre-publication**; M4 restart/smoke PASS, origin `127.0.0.1:7010`; public connector remains candidate |
 
 ## 14. Expected response from publication owner
 
 Please return:
 
 1. audit verdict: `READY_FOR_GO`, `HOLD`, or `BLOCKED`;
-2. resolved A-G values, explicitly recording M1 active authority/runtime and M4 source-authoring/read-only standby;
+2. resolved A-G values, explicitly recording M4 active source/index/refresh/runtime authority and M1 backup/cold standby;
 3. any collision/security finding;
 4. exact mutation sequence in dependency order;
 5. exact rollback sequence;
 6. the minimal explicit GO wording required from the user;
 7. whether any step must be split into a separate approval boundary.
 
-The corrected M1 delta receipt is now imported into this packet. This packet still authorizes **no production/external mutation** until the publication intake role returns `READY_FOR_GO` and the user gives a later explicit GO for Cloudflare/OAuth/DNS/public connector mutation.
+The M4 active and M1 cold-standby receipts are now the current authority basis for this packet; earlier M1-active evidence is historical rollback material only. This packet still authorizes **no production/external mutation** until the M4-authority revision is re-read by the publication intake role, a new `READY_FOR_GO` is returned, and the user gives the required re-GO for the M4 publication plan.
