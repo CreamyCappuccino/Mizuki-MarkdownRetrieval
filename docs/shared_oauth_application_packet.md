@@ -1,6 +1,6 @@
 # MDR Shared OAuth application packet
 
-Date: 2026-08-29  
+Date: 2026-09-01  
 Application: Mizuki Markdown Retrieval (MDR)  
 Target: public read-only MCP resource through StrangeBasket Shared OAuth  
 Current gate: **publication-owner audit / exact local binding still required before production mutation**
@@ -28,9 +28,22 @@ Evidence:
 
 The application retrieval backend was subsequently migrated from MDR-local SQLite to PostgreSQL + pgvector. That storage/runtime migration is a separate review slice and does not reopen the accepted HTTP/OAuth security design. Its first green migration checkpoint was `0b33e87da79c228e7d9d699d3e3b70dd56011a76` / Run #176.
 
-The PostgreSQL/pgvector reacceptance is now **ACCEPT / CLOSED** for the application/storage contract at MDR `f9e1bdb4b14e72c35cd1e7594d4436b380a07fae`, paired with SearchE/Toolkit `d1c7982e93bae9751f215834995c3fddfe3ea824`. The provider-generation fencing lineage includes SearchE `d35b88754f8b6c84b1a473ab12d61f1abc3c5dab`. The private SearchE workflow `MDR Real PG MCP Integration` Run `33223800327` checked out the exact MDR SHA, used `pgvector/pgvector:0.8.6-pg16`, and passed the real pgvector MCP Client acceptance. See `docs/postgres_pgvector_reacceptance_receipt.md`.
+The PostgreSQL/pgvector reacceptance is now **ACCEPT / CLOSED** for the application/storage contract at MDR `f9e1bdb4b14e72c35cd1e7594d4436b380a07fae`. The current SearchE/Toolkit production candidate is `7be04662679548bce24603978a15bedfdcb3f019` (`Fence historical Postgres apply receipts`), superseding the earlier accepted checkpoint `d1c7982e93bae9751f215834995c3fddfe3ea824` for production installation. The provider-generation fencing lineage includes SearchE `d35b88754f8b6c84b1a473ab12d61f1abc3c5dab`.
 
-This closes the PG implementation reacceptance only. Production M1 filesystem/env binding, installed service receipt, production generation build, Cloudflare, Shared OAuth registry, DNS, and public connector acceptance remain separate deployment gates.
+The corrected SearchE receipt records:
+- local source-tree + isolated pgvector: **29 passed**
+- fresh wheel install + isolated pgvector: **5 passed**
+- Tests Run `33429697823`: **SUCCESS**
+- Wheel Artifact Run `33429698050`: **SUCCESS**
+- wheel: `strangebasket_searche_toolkit-0.1.0-py3-none-any.whl`
+- wheel SHA-256: `ac2ce5e022f15665c0b8800bee22c30f7c92b392a79968379a903abf1af6fcac`
+- exact cross-repo MDR integration Run `33429831201`: **SUCCESS**
+- exact pair: MDR `f9e1bdb4b14e72c35cd1e7594d4436b380a07fae` + SearchE `7be04662679548bce24603978a15bedfdcb3f019`
+- real PostgreSQL/pgvector MCP Client: **1 passed in 1.34s**
+
+Historical apply receipts are now checked under the namespace advisory lock against the durable current generation. Only `current == plan.resulting_generation` may return `already_applied`; stale historical receipts fail closed with `PersistentIndexError`. Immediate identical retry still avoids unnecessary embedding recomputation.
+
+This closes the SearchE/PG implementation reacceptance. Production/public publication remains a separate gate. M1 local binding/runtime work has been reported complete by the operator, but the exact non-secret local receipt must be imported into this packet before submission to the publication intake role. Cloudflare, Shared OAuth registry, DNS, and public connector mutation remain unauthorized until the later explicit GO.
 
 ## 3. Proposed v1 deployment posture
 
@@ -266,7 +279,7 @@ After GO and publication mutation, acceptance must include at least:
 | B | Canonical hostname | `mdr.strangebasket.com` | collision-free in prior audit; account readback required before mutation |
 | C | Loopback port | `7010` | user selected; prior live probe clear; recheck on M1 before install |
 | D | Owner config/env paths | M1 owner-only paths; DB URL via env indirection; approved M4 -> M1 source/config sync | exact production paths and sync binding pending |
-| E | Data/index authority | Markdown canonical; M1 PostgreSQL/pgvector derived generation; one fenced refresh writer | **ACCEPT** at MDR `f9e1bdb4...` + SearchE `d1c7982e...`; real PG MCP workflow Run `33223800327` SUCCESS |
+| E | Data/index authority | Markdown canonical; M1 PostgreSQL/pgvector derived generation; one fenced refresh writer | **ACCEPT / CLOSED** at MDR `f9e1bdb4...` + SearchE `7be0466...`; Tests `33429697823`, wheel `33429698050`, exact MDR integration `33429831201` SUCCESS |
 | F | Availability/freshness | fail closed, no silent stale runtime/DB fallback | application posture accepted |
 | G | Runtime/lifecycle | installed `mizuki-mdr-remote` launcher + existing Ops/launchd conventions | launcher implementation accepted; live M1 installation/runtime receipt pending |
 
@@ -282,4 +295,4 @@ Please return:
 6. the minimal explicit GO wording required from the user;
 7. whether any step must be split into a separate approval boundary.
 
-Until the live M1 binding/runtime receipt, this response, and subsequent user GO, this packet authorizes **no production/external mutation**.
+Until the exact M1 local receipt is imported and the publication intake role returns its preflight verdict, this packet authorizes **no production/external mutation**. A later explicit user GO is still required before any Cloudflare/OAuth/DNS/public connector mutation.
