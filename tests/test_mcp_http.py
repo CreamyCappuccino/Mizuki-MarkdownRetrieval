@@ -192,7 +192,10 @@ def test_http_resource_server_exposes_discovery_auth_gate_and_safe_tool(
                         ]
                     }
                     assert all(tool.meta == expected_security for tool in tools.tools)
-                    result = await client.call_tool("list_markdown_scopes", {"limit": 10})
+                    result = await client.call_tool(
+                        "list_markdown_scopes",
+                        {"limit": 10, "response_format": "json"},
+                    )
                     assert result.is_error is False
                     assert result.structured_content["items"][0]["scope"] == "demo"
 
