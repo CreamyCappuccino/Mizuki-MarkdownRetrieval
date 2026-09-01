@@ -130,7 +130,7 @@ Expected local endpoints:
 /.well-known/oauth-protected-resource/mcp
 ```
 
-Before installation, perform a live read-only conflict probe on the selected serving host and confirm `7010` is free and appropriate. If occupied, return the conflict rather than silently selecting another port.
+Before public mutation, perform a live read-only owner probe on M1 and confirm `127.0.0.1:7010` is occupied by the expected MDR listener and that `/health` and `/ready` are healthy. Treat an unexpected owner or unhealthy listener as a conflict; do not require the accepted MDR port to be free.
 
 ## 6. Shared OAuth contract
 
@@ -199,34 +199,30 @@ The PostgreSQL host/connection secret must be resolved through owner-only enviro
 
 ## 8. Owner-only config / runtime audit
 
-Candidate owner config location:
+Receipt-backed exact M1 paths and modes:
 
 ```text
-~/.config/mizuki-markdown-retrieval/
+config directory:          /Users/ushio/.config/mizuki-markdown-retrieval/                                  mode 0700
+config TOML:               /Users/ushio/.config/mizuki-markdown-retrieval/markdown-retrieval.toml          mode 0600
+secret-bearing owner env:  /Users/ushio/.config/mizuki-markdown-retrieval/remote.env                       mode 0600
+source root:               /Users/ushio/.local/share/mizuki-markdown-retrieval/source/codex/               mode 0755
+state file:                /Users/ushio/.local/share/mizuki-markdown-retrieval/state/codex-environment.index-state.json mode 0600
+runtime/data root:         /Users/ushio/.local/share/mizuki-markdown-retrieval/                             mode 0755
+installed venv:            /Users/ushio/.local/share/mizuki-markdown-retrieval/venv/                        mode 0755
+Ops root:                  /Users/ushio/DevSpace/Ops/MDR/                                                   mode 0755
+runtime wrapper:           /Users/ushio/DevSpace/Ops/MDR/mdr-runtime-exec.sh                               mode 0755
+launchd plist:             /Users/ushio/Library/LaunchAgents/com.codex.mdr.remote.plist                     mode 0600
 ```
 
-Suggested files:
-
-```text
-remote.env
-markdown-retrieval.toml
-```
-
-Candidate local data/state root:
-
-```text
-~/.local/share/mizuki-markdown-retrieval/
-```
-
-Publication owner should verify the actual serving-host filesystem and choose final owner-only paths and modes. Recommended secret-bearing mode is `0600` where applicable. Do not treat these candidates as authority if the existing Ops layout already provides a better canonical location.
+Database URL indirection name: `MDR_DATABASE_URL`. Its value is intentionally omitted from Git/Relay/receipts. These paths are receipt-backed M1 authority, not candidates.
 
 ## 9. Lifecycle / operations
 
-Candidate logical labels:
+Lifecycle labels:
 
 ```text
-core service:  com.codex.mdr.remote
-public route:  com.codex.mdr.cloudflare-public
+actual core service:      com.codex.mdr.remote
+candidate public route:  com.codex.mdr.cloudflare-public
 ```
 
 Candidate dedicated Tunnel name:
@@ -235,7 +231,7 @@ Candidate dedicated Tunnel name:
 mdr-m1
 ```
 
-These names remain candidates until account/local collision readback immediately before mutation.
+`com.codex.mdr.remote` is the accepted live M1 core label. Only the public-route label and dedicated Tunnel name remain candidates until account/local collision readback immediately before mutation.
 
 The final Ops surface should provide an obvious path to:
 
@@ -257,7 +253,7 @@ The MM255/Cloudflare owner is authorized to perform **read-only inspection and p
 
 1. confirm M1 as the active serving/runtime host and PostgreSQL/pgvector writer/index authority, with M4 as source-authoring/read-only standby;
 2. identify the exact approved M4 -> M1 Markdown/config/code synchronization boundary and verify no implicit authority switch exists;
-3. probe whether local port `7010` is free on M1;
+3. confirm local port `7010` on M1 is owned by the expected MDR listener and that `/health` and `/ready` remain healthy;
 4. verify `mdr.strangebasket.com` has no DNS/tunnel/application collision;
 5. inspect existing Shared OAuth resource/scope registry naming for conflicts;
 6. identify exact M1 config/env/data/state/runtime paths without exposing secrets;
