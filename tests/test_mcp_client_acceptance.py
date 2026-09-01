@@ -25,14 +25,7 @@ def _config(tmp_path: Path) -> Path:
 
 def _assert_sanitized_provider_failure(result) -> None:
     assert result.is_error is False
-    assert result.structured_content is not None
-    assert result.structured_content["items"] == []
-    error = result.structured_content["error"]
-    assert error == {
-        "code": "provider_unavailable",
-        "message": "configured search backend is unavailable",
-        "details": {},
-    }
+    assert result.structured_content is None
     rendered = "\n".join(
         item.text for item in result.content if isinstance(item, TextContent)
     )
@@ -60,8 +53,7 @@ def test_in_memory_mcp_client_accepts_read_only_surface_and_missing_db_fails_clo
 
             scopes = await client.call_tool("list_markdown_scopes", {"limit": 10})
             assert scopes.is_error is False
-            assert scopes.structured_content is not None
-            assert scopes.structured_content["items"][0]["scope"] == "demo"
+            assert scopes.structured_content is None
             assert isinstance(scopes.content[0], TextContent)
             assert scopes.content[0].text.startswith("scopes=1 truncated=false")
 
@@ -70,8 +62,9 @@ def test_in_memory_mcp_client_accepts_read_only_surface_and_missing_db_fails_clo
                 {"scope": "demo", "limit": 10},
             )
             assert files.is_error is False
-            assert files.structured_content is not None
-            assert files.structured_content["items"] == ["rules.md"]
+            assert files.structured_content is None
+            assert isinstance(files.content[0], TextContent)
+            assert "rules.md" in files.content[0].text
 
             read = await client.call_tool(
                 "read_markdown",
@@ -84,10 +77,25 @@ def test_in_memory_mcp_client_accepts_read_only_surface_and_missing_db_fails_clo
                 },
             )
             assert read.is_error is False
-            assert read.structured_content is not None
-            assert read.structured_content["text"] == "keep this aligned\n"
+            assert read.structured_content is None
             assert isinstance(read.content[0], TextContent)
             assert "keep this aligned" in read.content[0].text
+
+            read_json = await client.call_tool(
+                "read_markdown",
+                {
+                    "scope": "demo",
+                    "path": "rules.md",
+                    "view": "hit",
+                    "line_start": 2,
+                    "max_chars": 100,
+                    "response_format": "json",
+                },
+            )
+            assert read_json.is_error is False
+            assert read_json.content == []
+            assert read_json.structured_content is not None
+            assert read_json.structured_content["text"] == "keep this aligned\n"
 
             missing = await client.call_tool(
                 "search_related_markdown",
@@ -142,9 +150,7 @@ def test_stdio_mcp_client_launches_real_server_process_and_reads_safely(tmp_path
                 },
             )
             assert read.is_error is False
-            assert read.structured_content is not None
-            assert read.structured_content["path"] == "rules.md"
-            assert "keep this aligned" in read.structured_content["text"]
+            assert read.structured_content is None
             assert isinstance(read.content[0], TextContent)
             assert read.content[0].text.startswith(
                 "scope=demo path=rules.md view=around lines=1-2/2 truncated=false"
