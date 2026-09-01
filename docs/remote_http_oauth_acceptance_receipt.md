@@ -100,11 +100,13 @@ Final review evidence reported by Codex:
 
 ## Boundary still open
 
-The local Remote HTTP/OAuth implementation is accepted, and the deployment topology has since moved to **M1 active serving/runtime + PostgreSQL/pgvector writer/index authority**, with **M4 source authoring + read-only standby**. The remaining work is a separate **public publication gate**:
+The local Remote HTTP/OAuth implementation is accepted. The current deployment topology is **M4 local-first**: M4 owns Markdown source/index/refresh/runtime authority and is the sole writer; M1 is a verified backup/cold standby with service/listener off and no automatic or silent failover. The remaining work is a separate **public publication gate**:
 
-- M1 SearchE production-pin delta acceptance is **CLOSED**; receipt: `/Users/ushio/DevSpace/Ops/MDR/mdr-m1-searche-pin-delta-receipt-2026-09-01.md`;
-- exact non-secret M1 config/env/source/state/Ops paths and accepted generation/schema are recorded in the M1 receipts and must be carried into the publication packet authority section;
-- keep the v1 public candidate bounded to `codex-environment` root-level Markdown (25 files); larger project scopes remain HOLD until bounded batched embedding exists;
+- current M4 active acceptance is **CLOSED**; receipt: `/Users/ushio/DevSpace/Ops/MDR/mdr-m4-active-acceptance-receipt-2026-09-01.md`;
+- M1 cold-standby acceptance is **CLOSED**; receipt: `/Users/ushio/DevSpace/Ops/MDR/mdr-m1-cold-standby-receipt-2026-09-01.md`;
+- current M4 accepted state is `codex-environment`, 25 root-level Markdown files / 257 chunks, schema `mdr_codex_environment`, generation `mdr-state-4308016b147a54c29ccae7d4c076ea1f4346768a1016c93e08535834069f3504`;
+- old M1 25-file / 255-chunk evidence is historical rollback/standby evidence only, not current authority;
+- larger project scopes remain HOLD until bounded batched embedding exists;
 - Shared OAuth resource/scope registry entry;
 - real Shared AS token issuance and JWKS rotation behavior for the MDR resource;
 - Cloudflare DNS/Tunnel/canonical hostname routing;
