@@ -1,17 +1,17 @@
 # Public Streamable HTTP / OAuth publication gate
 
-Status: publication gate. Local read-only MCP and M1 production binding are accepted over stdio and loopback Streamable HTTP; the public endpoint remains disabled pending Cloudflare/Shared OAuth/public real-client acceptance.
+Status: publication gate. Local read-only MCP and the **M4 active production binding** are accepted over stdio and loopback Streamable HTTP; the public endpoint remains disabled pending Cloudflare/Shared OAuth/public real-client acceptance.
 
 This document defines the conditions that must be satisfied before Mizuki Markdown Retrieval is exposed as a public Streamable HTTP MCP endpoint. It is intentionally separate from the local MCP v0 contract and from the CLI-only durable index mutation route.
 
 
 ## Current pre-publication deployment state
 
-The active deployment candidate is M1 serving/runtime + PostgreSQL/pgvector writer/index authority, with M4 as source-authoring/read-only standby and no automatic failover. M1 loopback `127.0.0.1:7010` has been observed listening with `/health` OK, `/ready` 200, and launchd label `com.codex.mdr.remote`.
+The accepted deployment is **M4 local-first**: M4 is source/index/refresh/runtime authority and the sole writer. M4 loopback `127.0.0.1:7010` is the accepted MDR listener with `/health`, `/ready`, protected-resource metadata, and anonymous-MCP authorization behavior accepted; launchd core label is `com.codex.mdr.remote`. M1 is a verified backup/cold standby with service/listener off and no automatic or silent failover.
 
-The current SearchE production candidate is `7be04662679548bce24603978a15bedfdcb3f019` with wheel SHA-256 `ac2ce5e022f15665c0b8800bee22c30f7c92b392a79968379a903abf1af6fcac`. M1 replacement and delta acceptance are **CLOSED**; no further local re-acceptance is required. Publication remains disabled only for the public Cloudflare/Shared OAuth/real-client gate.
+M4 PostgreSQL 17.7 / pgvector 0.8.1 is the accepted current durable-index runtime. The current SearchE production candidate is `7be04662679548bce24603978a15bedfdcb3f019` with wheel SHA-256 `ac2ce5e022f15665c0b8800bee22c30f7c92b392a79968379a903abf1af6fcac`. M4 active acceptance is **CLOSED**; no further local re-acceptance is required. Publication remains disabled only for the public Cloudflare/Shared OAuth/real-client gate.
 
-The initial public retrieval universe is intentionally bounded to the `codex-environment` scope, root-level Markdown only, currently 25 files. The 2261-file M4→M1 mirror count is a synchronization inventory, **not** the v1 public indexed universe. Large project scopes remain HOLD until bounded batched embedding is implemented and accepted.
+The initial public retrieval universe is intentionally bounded to the `codex-environment` scope, root-level Markdown only, currently 25 files / 257 chunks on M4. The historical 2261-file mirror inventory is **not** the v1 public indexed universe. Large project scopes remain HOLD until bounded batched embedding is implemented and accepted.
 
 ## Boundary to preserve
 
