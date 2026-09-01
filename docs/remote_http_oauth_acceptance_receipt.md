@@ -100,11 +100,13 @@ Final review evidence reported by Codex:
 
 ## Boundary still open
 
-The following remain a separate **public publication gate**:
+The local Remote HTTP/OAuth implementation is accepted, and the deployment topology has since moved to **M1 active serving/runtime + PostgreSQL/pgvector writer/index authority**, with **M4 source authoring + read-only standby**. The remaining work is a separate **public publication gate**:
 
-- live M4 port/path/config/runtime audit;
+- finalize the M1 runtime delta receipt with the current SearchE production candidate (`7be0466...`) and exact wheel hash;
+- record exact non-secret M1 config/env/source/state/Ops paths and accepted generation/schema;
+- keep the v1 public candidate bounded to `codex-environment` root-level Markdown (25 files); larger project scopes remain HOLD until bounded batched embedding exists;
 - Shared OAuth resource/scope registry entry;
-- real Shared AS token issuance and JWKS rotation behavior;
+- real Shared AS token issuance and JWKS rotation behavior for the MDR resource;
 - Cloudflare DNS/Tunnel/canonical hostname routing;
 - canonical Host/Origin behavior through the tunnel;
 - PRM and `WWW-Authenticate` over the public route;
