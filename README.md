@@ -196,7 +196,7 @@ All four tools advertise `readOnlyHint=true`, `destructiveHint=false`, `idempote
 
 The MCP surface never accepts arbitrary filesystem roots, database URLs, schemas, model paths, provider revisions, or refresh mutation as tool inputs. Those runtime details are fixed by owner configuration. Normal MCP `content` is compact model-facing text while full payloads remain in `structuredContent`.
 
-Remote HTTP/Shared OAuth has a separately accepted local implementation, and the M1 production host binding is accepted. Public Cloudflare/DNS/Tunnel/Shared OAuth registration and real-client acceptance remain behind `docs/public_http_oauth_publication_gate.md`.
+Remote HTTP/Shared OAuth has a separately accepted local implementation. The current production binding is **M4 local-first**: M4 owns source/index/refresh/runtime authority and is the sole writer, while M1 is a verified backup/cold standby with its service/listener off and no automatic or silent failover. Public Cloudflare/DNS/Tunnel/Shared OAuth registration and real-client acceptance remain behind `docs/public_http_oauth_publication_gate.md`.
 
 ## Shared SearchE / Retrieval Toolkit revision
 
@@ -210,7 +210,7 @@ Codex-SearchEngine 7be04662679548bce24603978a15bedfdcb3f019
 
 That revision is the current tested production candidate. SearchE-side evidence lives in `CreamyCappuccino/Codex-SearchEngine`: Tests Run `33429697823`, Wheel Artifact Run `33429698050`, and exact cross-repo MDR integration Run `33429831201` are SUCCESS. The candidate wheel is `strangebasket_searche_toolkit-0.1.0-py3-none-any.whl` with SHA-256 `ac2ce5e022f15665c0b8800bee22c30f7c92b392a79968379a903abf1af6fcac`.
 
-M1 delta acceptance has proved that this exact candidate is installed: SearchE `7be0466...` with the accepted wheel hash. The earlier `d1c7982...` wheel is retained only as a local runtime rollback artifact.
+SearchE `7be0466...` with the accepted wheel hash is installed in the accepted M4 active runtime. The earlier M1 `d1c7982...`/25-file rollback evidence remains historical standby material only and is not current authority.
 
 ## Not implemented yet
 
