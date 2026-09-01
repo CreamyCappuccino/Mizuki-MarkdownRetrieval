@@ -67,15 +67,15 @@ This receipt does **not** prove or authorize the production deployment.
 
 Still pending:
 
-- exact M1 production filesystem/config/env/state/runtime binding;
-- approved M4 -> M1 Markdown/config/code synchronization boundary;
-- live M1 port `7010` probe;
-- live M1 installed service / launchd / Ops runtime receipt;
+- exact current production filesystem/config/env/state/runtime binding (now M4 active; M1 cold standby);
+- current M4 source/index/refresh/runtime authority and explicit M1 cold-standby boundary;
+- live active-host port `7010` owner/health/readiness probe (current host: M4);
+- live installed service / launchd / Ops runtime receipt for the active host;
 - production PostgreSQL schema/generation build and parity receipt;
 - Cloudflare Tunnel/DNS mutation;
 - Shared OAuth resource/scope registry mutation;
 - public client/connector publication and real ChatGPT acceptance.
 
-The current deployment decision is M1 active serving/runtime plus PostgreSQL/pgvector writer/index authority, with M4 as source-authoring and read-only standby. That topology is a deployment posture, not an application hard-code; MDR continues to use `database_url_env` indirection.
+This receipt originally preceded the final host-authority decision. The current deployment posture is now **M4 local-first**: M4 owns source/index/refresh/runtime and PostgreSQL/pgvector writer/index authority as sole writer; M1 is a verified backup/cold standby with no automatic or silent failover. This remains a deployment posture, not application hard-code; MDR continues to use `database_url_env` indirection.
 
-Therefore the PostgreSQL/pgvector implementation gate is **ACCEPT**, while the overall publication gate remains **HOLD** until the live M1 binding/runtime receipt and subsequent publication-owner/user GO.
+Therefore the PostgreSQL/pgvector implementation gate remains **ACCEPT**. The M4 active and M1 cold-standby runtime receipts supersede the older M1-active deployment wording; the separate public Cloudflare/Shared OAuth/real-client gate remains pending.
