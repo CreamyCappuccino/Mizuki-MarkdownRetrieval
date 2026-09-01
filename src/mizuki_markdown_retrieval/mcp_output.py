@@ -1,17 +1,26 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from mcp.types import CallToolResult, TextContent
 
 
-def tool_result(payload: dict[str, Any], text: str) -> CallToolResult:
-    """Return compact model-facing text plus the full structured payload."""
+ResponseFormat = Literal["compact", "json"]
 
-    return CallToolResult(
-        content=[TextContent(type="text", text=text)],
-        structured_content=payload,
-    )
+
+def tool_result(
+    payload: dict[str, Any],
+    text: str,
+    *,
+    response_format: ResponseFormat = "compact",
+) -> CallToolResult:
+    """Return exactly one model-facing representation to avoid duplicate token cost."""
+
+    if response_format == "compact":
+        return CallToolResult(content=[TextContent(type="text", text=text)])
+    if response_format == "json":
+        return CallToolResult(content=[], structured_content=payload)
+    raise ValueError(f"unsupported response_format: {response_format}")
 
 
 def format_scopes(payload: dict[str, Any]) -> str:
@@ -19,8 +28,10 @@ def format_scopes(payload: dict[str, Any]) -> str:
         f"scopes={payload['count']} truncated={_bool(payload['truncated'])}",
     ]
     for item in payload["items"]:
+        namespace = item["namespace"]
+        namespace_text = "" if namespace == item["scope"] else f" | namespace={namespace}"
         lines.append(
-            f"- {item['scope']} | namespace={item['namespace']} | "
+            f"- {item['scope']}{namespace_text} | "
             f"search={'yes' if item['search_enabled'] else 'no'} | "
             f"chunk={item['chunk_profile']}"
         )
@@ -40,8 +51,7 @@ def format_search(payload: dict[str, Any], *, mode: str) -> str:
     source = payload["source"]
     lines = [
         f"scope={payload['scope']} mode={mode} results={len(payload['items'])}",
-        "source=" + _location(source.get("path"), source.get("line_start"), source.get("line_end"))
-        + f" | doc={source['document_id']} | chunk={source['chunk_id']}",
+        "source=" + _location(source.get("path"), source.get("line_start"), source.get("line_end")),
     ]
     error = payload.get("error")
     if error is not None:
@@ -54,7 +64,6 @@ def format_search(payload: dict[str, Any], *, mode: str) -> str:
             f"{index}. {_location(item.get('path'), item.get('line_start'), item.get('line_end'))} "
             f"| score={score_text} | heading={heading}"
         )
-        lines.append(f"   doc={item['document_id']} | chunk={item['chunk_id']}")
     return "\n".join(lines)
 
 
