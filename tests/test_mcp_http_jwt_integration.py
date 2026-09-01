@@ -137,7 +137,10 @@ def test_strict_jwt_verifier_integrates_with_http_auth_and_mcp_client(
                         http_client=authenticated_http,
                     )
                 ) as client:
-                    result = await client.call_tool("list_markdown_scopes", {"limit": 10})
+                    result = await client.call_tool(
+                        "list_markdown_scopes",
+                        {"limit": 10, "response_format": "json"},
+                    )
                     assert result.is_error is False
                     assert result.structured_content["items"][0]["scope"] == "demo"
 
