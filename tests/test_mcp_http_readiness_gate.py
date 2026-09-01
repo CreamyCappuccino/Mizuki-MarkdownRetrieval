@@ -117,7 +117,10 @@ def test_readiness_gate_runs_after_auth_and_scope_but_before_mcp_dispatch(
                         http_client=authenticated_http,
                     )
                 ) as client:
-                    result = await client.call_tool("list_markdown_scopes", {"limit": 10})
+                    result = await client.call_tool(
+                        "list_markdown_scopes",
+                        {"limit": 10, "response_format": "json"},
+                    )
                     assert result.is_error is False
                     assert result.structured_content["items"][0]["scope"] == "demo"
 
