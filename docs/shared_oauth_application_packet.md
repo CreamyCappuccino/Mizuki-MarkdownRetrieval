@@ -33,6 +33,7 @@ The PostgreSQL/pgvector reacceptance is now **ACCEPT / CLOSED** for the applicat
 The corrected SearchE receipt records:
 - local source-tree + isolated pgvector: **29 passed**
 - fresh wheel install + isolated pgvector: **5 passed**
+- SearchE evidence repository: `CreamyCappuccino/Codex-SearchEngine`
 - Tests Run `33429697823`: **SUCCESS**
 - Wheel Artifact Run `33429698050`: **SUCCESS**
 - wheel: `strangebasket_searche_toolkit-0.1.0-py3-none-any.whl`
@@ -43,7 +44,7 @@ The corrected SearchE receipt records:
 
 Historical apply receipts are now checked under the namespace advisory lock against the durable current generation. Only `current == plan.resulting_generation` may return `already_applied`; stale historical receipts fail closed with `PersistentIndexError`. Immediate identical retry still avoids unnecessary embedding recomputation.
 
-This closes the SearchE/PG implementation reacceptance. Production/public publication remains a separate gate. M1 local binding/runtime work has been reported complete by the operator, but the exact non-secret local receipt must be imported into this packet before submission to the publication intake role. Cloudflare, Shared OAuth registry, DNS, and public connector mutation remain unauthorized until the later explicit GO.
+This closes the SearchE/PG implementation reacceptance. Production/public publication remains a separate gate. A non-secret M1 local receipt exists at `/Users/ushio/DevSpace/Ops/MDR/mdr-m1-local-runtime-receipt-2026-09-01.md`, and live read-only preflight observed `127.0.0.1:7010` listening, `/health` OK, `/ready` 200, and launchd `com.codex.mdr.remote`. However, that receipt still records the earlier SearchE `d1c7982...` wheel, so it is **not yet the final production receipt**. The M1 dedicated runtime must be updated to `7be0466...` / wheel SHA `ac2ce5e0...` and reaccepted in a delta receipt before READY_FOR_GO review. Cloudflare, Shared OAuth registry, DNS, and public connector mutation remain unauthorized until the later explicit GO.
 
 ## 3. Proposed v1 deployment posture
 
@@ -60,6 +61,19 @@ Current v1 posture:
 - no silent stale-replica routing
 
 This is the current deployment decision, not an application hard-code. MDR still selects the database connection only through each scope's owner-controlled `database_url_env`, so the code preserves deployment indirection. Boundary 1 must bind the exact M1 paths, environment, source synchronization, and runtime installation without copying secrets into Git.
+
+
+### v1 public scope boundary
+
+The initial public candidate is intentionally narrow:
+
+- scope: `codex-environment`
+- indexed/public retrieval universe: root-level Markdown only
+- current accepted candidate size: **25 files**
+- M4→M1 Markdown mirror inventory: **2261 files**, which is a synchronization count and **not** the public/indexed universe
+- large project scopes: **HOLD** until bounded batched embedding exists and is separately accepted
+
+This distinction must remain explicit in receipts and public documentation so mirror size is never mistaken for authorization or indexing scope.
 
 ## 4. Canonical public resource
 
@@ -275,13 +289,13 @@ After GO and publication mutation, acceptance must include at least:
 
 | ID | Decision | v1 application value | Status before mutation |
 |---|---|---|---|
-| A | Serving/runtime + standby topology | M1 active serving/runtime; M1 PostgreSQL/pgvector writer/index authority; M4 source authoring + read-only standby; explicit failover only | deployment decision accepted; live M1 binding/receipt pending |
+| A | Serving/runtime + standby topology | M1 active serving/runtime; M1 PostgreSQL/pgvector writer/index authority; M4 source authoring + read-only standby; explicit failover only | live M1 runtime observed; final corrected delta receipt pending |
 | B | Canonical hostname | `mdr.strangebasket.com` | collision-free in prior audit; account readback required before mutation |
-| C | Loopback port | `7010` | user selected; prior live probe clear; recheck on M1 before install |
-| D | Owner config/env paths | M1 owner-only paths; DB URL via env indirection; approved M4 -> M1 source/config sync | exact production paths and sync binding pending |
-| E | Data/index authority | Markdown canonical; M1 PostgreSQL/pgvector derived generation; one fenced refresh writer | **ACCEPT / CLOSED** at MDR `f9e1bdb4...` + SearchE `7be0466...`; Tests `33429697823`, wheel `33429698050`, exact MDR integration `33429831201` SUCCESS |
-| F | Availability/freshness | fail closed, no silent stale runtime/DB fallback | application posture accepted |
-| G | Runtime/lifecycle | installed `mizuki-mdr-remote` launcher + existing Ops/launchd conventions | launcher implementation accepted; live M1 installation/runtime receipt pending |
+| C | Loopback port | `7010` | live M1 listener observed; `/health` OK and `/ready` 200 |
+| D | Owner config/env paths | M1 owner-only paths; DB URL via env indirection; approved M4 -> M1 source/config sync | base M1 receipt exists; exact values must be imported from corrected delta receipt |
+| E | Data/index authority | Markdown canonical; M1 PostgreSQL/pgvector derived generation; one fenced refresh writer; v1 public scope `codex-environment` / 25 root-level Markdown files | SearchE/PG contract **ACCEPT / CLOSED** at MDR `f9e1bdb4...` + SearchE `7be0466...`; M1 installed pin correction and delta receipt pending |
+| F | Availability/freshness | fail closed, no silent stale runtime/DB fallback; large scopes HOLD until bounded batched embedding | application posture accepted |
+| G | Runtime/lifecycle | `mizuki-mdr-remote`; launchd `com.codex.mdr.remote`; Ops-managed lifecycle | live runtime observed; corrected SearchE pin + restart/smoke delta receipt pending |
 
 ## 14. Expected response from publication owner
 
