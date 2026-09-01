@@ -51,6 +51,8 @@ def test_mcp_search_schema_is_constrained(tmp_path: Path) -> None:
     assert props["top_k"]["maximum"] == 20
     assert props["candidate_k"]["anyOf"][0]["minimum"] == 1
     assert props["candidate_k"]["anyOf"][0]["maximum"] == 200
+    assert props["response_format"]["enum"] == ["compact", "json"]
+    assert props["response_format"]["default"] == "compact"
 
 
 def test_mcp_read_schema_requires_explicit_view_and_describes_line_intent(tmp_path: Path) -> None:
@@ -65,7 +67,7 @@ def test_mcp_read_schema_requires_explicit_view_and_describes_line_intent(tmp_pa
     assert "Required for hit/around" in props["line_start"]["description"]
 
 
-def test_mcp_read_tool_safe_call_returns_compact_text_and_structured_content(tmp_path: Path) -> None:
+def test_mcp_read_tool_defaults_to_compact_text_only(tmp_path: Path) -> None:
     server = build_server(_config(tmp_path))
     result = asyncio.run(
         server.call_tool(
@@ -82,11 +84,7 @@ def test_mcp_read_tool_safe_call_returns_compact_text_and_structured_content(tmp
     )
 
     assert result.is_error is False
-    assert result.structured_content is not None
-    assert result.structured_content["path"] == "rules.md"
-    assert result.structured_content["line_start"] == 2
-    assert result.structured_content["line_end"] == 2
-    assert result.structured_content["text"] == "keep this aligned\n"
+    assert result.structured_content is None
     assert len(result.content) == 1
     assert isinstance(result.content[0], TextContent)
     assert result.content[0].text == (
@@ -94,3 +92,29 @@ def test_mcp_read_tool_safe_call_returns_compact_text_and_structured_content(tmp
         "keep this aligned\n"
     )
     assert not result.content[0].text.lstrip().startswith("{")
+
+
+def test_mcp_read_tool_json_is_explicit_and_not_duplicated_as_text(tmp_path: Path) -> None:
+    server = build_server(_config(tmp_path))
+    result = asyncio.run(
+        server.call_tool(
+            "read_markdown",
+            {
+                "scope": "demo",
+                "path": "rules.md",
+                "view": "hit",
+                "line_start": 2,
+                "line_end": 2,
+                "max_chars": 100,
+                "response_format": "json",
+            },
+        )
+    )
+
+    assert result.is_error is False
+    assert result.content == []
+    assert result.structured_content is not None
+    assert result.structured_content["path"] == "rules.md"
+    assert result.structured_content["line_start"] == 2
+    assert result.structured_content["line_end"] == 2
+    assert result.structured_content["text"] == "keep this aligned\n"
