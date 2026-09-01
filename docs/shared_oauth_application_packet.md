@@ -3,7 +3,7 @@
 Date: 2026-09-01  
 Application: Mizuki Markdown Retrieval (MDR)  
 Target: public read-only MCP resource through StrangeBasket Shared OAuth  
-Current gate: **publication-owner audit / exact local binding still required before production mutation**
+Current gate: **final publication-owner READY_FOR_GO re-review; M1 local delta acceptance CLOSED**
 
 ## 1. Scope of this packet
 
@@ -44,7 +44,26 @@ The corrected SearchE receipt records:
 
 Historical apply receipts are now checked under the namespace advisory lock against the durable current generation. Only `current == plan.resulting_generation` may return `already_applied`; stale historical receipts fail closed with `PersistentIndexError`. Immediate identical retry still avoids unnecessary embedding recomputation.
 
-This closes the SearchE/PG implementation reacceptance. Production/public publication remains a separate gate. A non-secret M1 local receipt exists at `/Users/ushio/DevSpace/Ops/MDR/mdr-m1-local-runtime-receipt-2026-09-01.md`, and live read-only preflight observed `127.0.0.1:7010` listening, `/health` OK, `/ready` 200, and launchd `com.codex.mdr.remote`. However, that receipt still records the earlier SearchE `d1c7982...` wheel, so it is **not yet the final production receipt**. The M1 dedicated runtime must be updated to `7be0466...` / wheel SHA `ac2ce5e0...` and reaccepted in a delta receipt before READY_FOR_GO review. Cloudflare, Shared OAuth registry, DNS, and public connector mutation remain unauthorized until the later explicit GO.
+This closes the SearchE/PG implementation reacceptance. Production/public publication remains a separate gate. The original non-secret M1 local receipt is `/Users/ushio/DevSpace/Ops/MDR/mdr-m1-local-runtime-receipt-2026-09-01.md`; the corrected SearchE production-pin delta acceptance is **CLOSED** in `/Users/ushio/DevSpace/Ops/MDR/mdr-m1-searche-pin-delta-receipt-2026-09-01.md`.
+
+The corrected M1 runtime now records:
+- installed SearchE source SHA: `7be04662679548bce24603978a15bedfdcb3f019`
+- installed wheel SHA-256: `ac2ce5e022f15665c0b8800bee22c30f7c92b392a79968379a903abf1af6fcac`
+- MDR runtime SHA: `f9e1bdb4b14e72c35cd1e7594d4436b380a07fae`
+- schema: `mdr_codex_environment`
+- generation: `mdr-state-471b370f7550ad67a020e12fdcb7afd62a3fae850d627d1a47529e0ec35d2c23`
+- refresh readback: 25 files, changed 0, unchanged state committed; generation / 255 chunks / 1 apply receipt unchanged
+- stdio: 4 tools + search/read PASS
+- literal / semantic / hybrid: PASS, 3 hits each
+- HTTP: `/health=200`, `/ready=200`, protected-resource metadata `200`, anonymous MCP `401`
+- restart smoke: PASS under launchd `com.codex.mdr.remote`
+- Ops root: `/Users/ushio/DevSpace/Ops/MDR/`
+- origin: `127.0.0.1:7010`
+- M4 receipt commit: `7e0a15b`; paired M1 commit: `2159e41`
+- rollback artifact: prior `d1c7982...` wheel retained locally
+- external/public mutation during delta acceptance: **0**
+
+The v1 indexed universe remains `codex-environment` root-level Markdown, 25 files. The 2261-file mirror inventory is not the public/indexed universe; large scopes remain HOLD until bounded batched embedding is implemented and separately accepted. Cloudflare, Shared OAuth registry, DNS, and public connector mutation remain unauthorized until the later explicit user GO.
 
 ## 3. Proposed v1 deployment posture
 
@@ -60,7 +79,7 @@ Current v1 posture:
 - refresh writer: exactly one operator-owned workflow per scope, with local cross-process serialization and provider-side generation fencing
 - no silent stale-replica routing
 
-This is the current deployment decision, not an application hard-code. MDR still selects the database connection only through each scope's owner-controlled `database_url_env`, so the code preserves deployment indirection. Boundary 1 must bind the exact M1 paths, environment, source synchronization, and runtime installation without copying secrets into Git.
+This is the current deployment decision, not an application hard-code. MDR still selects the database connection only through each scope's owner-controlled `database_url_env`, so the code preserves deployment indirection. Boundary 1 local runtime binding is now evidenced by the base M1 receipt plus the corrected SearchE pin delta receipt. Exact non-secret bindings remain receipt-backed; secrets stay owner-only and are not copied into Git.
 
 
 ### v1 public scope boundary
@@ -289,13 +308,13 @@ After GO and publication mutation, acceptance must include at least:
 
 | ID | Decision | v1 application value | Status before mutation |
 |---|---|---|---|
-| A | Serving/runtime + standby topology | M1 active serving/runtime; M1 PostgreSQL/pgvector writer/index authority; M4 source authoring + read-only standby; explicit failover only | live M1 runtime observed; final corrected delta receipt pending |
+| A | Serving/runtime + standby topology | M1 active serving/runtime; M1 PostgreSQL/pgvector writer/index authority; M4 source authoring + read-only standby; explicit failover only | **CLOSED** by base M1 receipt + SearchE pin delta receipt |
 | B | Canonical hostname | `mdr.strangebasket.com` | collision-free in prior audit; account readback required before mutation |
 | C | Loopback port | `7010` | live M1 listener observed; `/health` OK and `/ready` 200 |
-| D | Owner config/env paths | M1 owner-only paths; DB URL via env indirection; approved M4 -> M1 source/config sync | base M1 receipt exists; exact values must be imported from corrected delta receipt |
-| E | Data/index authority | Markdown canonical; M1 PostgreSQL/pgvector derived generation; one fenced refresh writer; v1 public scope `codex-environment` / 25 root-level Markdown files | SearchE/PG contract **ACCEPT / CLOSED** at MDR `f9e1bdb4...` + SearchE `7be0466...`; M1 installed pin correction and delta receipt pending |
+| D | Owner config/env paths | M1 owner-only paths; DB URL via env indirection; approved M4 -> M1 source/config sync | **CLOSED for pre-publication** by receipt-backed M1 binding; secrets remain owner-only |
+| E | Data/index authority | Markdown canonical; M1 PostgreSQL/pgvector derived generation; one fenced refresh writer; v1 public scope `codex-environment` / 25 root-level Markdown files | **ACCEPT / CLOSED** at MDR `f9e1bdb4...` + installed SearchE `7be0466...`; generation `mdr-state-471b...` |
 | F | Availability/freshness | fail closed, no silent stale runtime/DB fallback; large scopes HOLD until bounded batched embedding | application posture accepted |
-| G | Runtime/lifecycle | `mizuki-mdr-remote`; launchd `com.codex.mdr.remote`; Ops-managed lifecycle | live runtime observed; corrected SearchE pin + restart/smoke delta receipt pending |
+| G | Runtime/lifecycle | `mizuki-mdr-remote`; launchd `com.codex.mdr.remote`; Ops-managed lifecycle | **CLOSED for pre-publication**; restart/smoke PASS, origin `127.0.0.1:7010` |
 
 ## 14. Expected response from publication owner
 
@@ -309,4 +328,4 @@ Please return:
 6. the minimal explicit GO wording required from the user;
 7. whether any step must be split into a separate approval boundary.
 
-Until the exact M1 local receipt is imported and the publication intake role returns its preflight verdict, this packet authorizes **no production/external mutation**. A later explicit user GO is still required before any Cloudflare/OAuth/DNS/public connector mutation.
+The corrected M1 delta receipt is now imported into this packet. This packet still authorizes **no production/external mutation** until the publication intake role returns `READY_FOR_GO` and the user gives a later explicit GO for Cloudflare/OAuth/DNS/public connector mutation.
