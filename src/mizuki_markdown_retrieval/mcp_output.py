@@ -77,6 +77,36 @@ def format_read(payload: dict[str, Any]) -> str:
     return header if not text else f"{header}\n{text}"
 
 
+
+def format_browse(payload: dict[str, Any]) -> str:
+    lines = [
+        f"path={payload['path']} depth={payload['depth']} items={payload['count']} "
+        f"truncated={_bool(payload['truncated'])}",
+    ]
+    for item in payload["items"]:
+        marker = "dir" if item["type"] == "dir" else "md"
+        lines.append(f"- [{marker}] {item['path']}")
+    return "\n".join(lines)
+
+
+def format_scope_management(payload: dict[str, Any]) -> str:
+    action = payload.get("action", "scope")
+    if action == "delete":
+        return (
+            f"scope={payload['scope']} deleted=true durable_data_preserved="
+            f"{_bool(payload.get('durable_data_preserved', True))}"
+        )
+    if action == "refresh":
+        return (
+            f"scope={payload['scope']} files={payload['discovered_count']} "
+            f"changed={payload['changed_count']} status={payload['status']}"
+        )
+    return (
+        f"scope={payload['scope']} root={payload['root']} recursive={_bool(payload['recursive'])} "
+        f"mode={payload['mode']} search={'yes' if payload['search_enabled'] else 'no'} "
+        f"chunk={payload['chunk_profile']}"
+    )
+
 def _location(path: Any, line_start: Any, line_end: Any) -> str:
     rendered_path = path or "?"
     if line_start is None:
@@ -88,35 +118,3 @@ def _location(path: Any, line_start: Any, line_end: Any) -> str:
 
 def _bool(value: Any) -> str:
     return "true" if value else "false"
-
-
-def format_browse(payload: dict[str, Any]) -> str:
-    lines = [
-        f"path={payload['path']} items={payload['count']}/{payload['total']} "
-        f"truncated={_bool(payload['truncated'])}"
-    ]
-    for item in payload["items"]:
-        marker = "dir" if item["type"] == "dir" else "md"
-        suffix = "/" if marker == "dir" else ""
-        lines.append(f"- [{marker}] {item['path']}{suffix}")
-    return "\n".join(lines)
-
-
-def format_manage(payload: dict[str, Any]) -> str:
-    action = payload.get("action", "?")
-    scope = payload.get("scope", "?")
-    status = payload.get("status", "ok")
-    if action == "refresh":
-        return (
-            f"scope={scope} action=refresh files={payload.get('discovered_count')} "
-            f"changed={payload.get('changed_count')} status={payload.get('status')}"
-        )
-    lines = [f"scope={scope} action={action} status={status}"]
-    if action != "delete":
-        lines.append(
-            f"root={payload.get('root')} recursive={_bool(payload.get('recursive'))} "
-            f"mode={payload.get('mode')} search={'yes' if payload.get('search_enabled') else 'no'}"
-        )
-    elif payload.get("durable_index_retained"):
-        lines.append("durable_index_retained=true")
-    return "\n".join(lines)
