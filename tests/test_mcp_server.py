@@ -39,6 +39,10 @@ def test_mcp_tools_have_explicit_read_only_local_annotations(tmp_path: Path) -> 
         assert tool.description
         assert tool.annotations is not None
         assert tool.annotations.open_world_hint is False
+        assert tool.output_schema is not None
+        assert tool.output_schema["type"] == "object"
+        assert tool.output_schema["properties"]["format"]["enum"] == ["compact", "json"]
+        assert "format" in tool.output_schema["required"]
     read_only = [tool for tool in tools if tool.name != "manage_markdown_scope"]
     for tool in read_only:
         assert tool.annotations.read_only_hint is True
@@ -94,7 +98,7 @@ def test_mcp_read_tool_defaults_to_compact_text_only(tmp_path: Path) -> None:
     )
 
     assert result.is_error is False
-    assert result.structured_content is None
+    assert result.structured_content == {"format": "compact"}
     assert len(result.content) == 1
     assert isinstance(result.content[0], TextContent)
     assert result.content[0].text == (
@@ -124,6 +128,7 @@ def test_mcp_read_tool_json_is_explicit_and_not_duplicated_as_text(tmp_path: Pat
     assert result.is_error is False
     assert result.content == []
     assert result.structured_content is not None
+    assert result.structured_content["format"] == "json"
     assert result.structured_content["path"] == "rules.md"
     assert result.structured_content["line_start"] == 2
     assert result.structured_content["line_end"] == 2
@@ -159,7 +164,7 @@ def test_mcp_browse_and_scope_create_are_workspace_bounded(tmp_path: Path) -> No
 
     browse = asyncio.run(server.call_tool("browse_markdown_filesystem", {"path": "projects", "depth": 2}))
     assert browse.is_error is False
-    assert browse.structured_content is None
+    assert browse.structured_content == {"format": "compact"}
     assert "projects/alpha" in browse.content[0].text
     assert "projects/alpha/README.md" in browse.content[0].text
 
