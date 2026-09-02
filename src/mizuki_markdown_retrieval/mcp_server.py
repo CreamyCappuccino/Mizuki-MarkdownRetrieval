@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 from mcp.server import MCPServer
 from mcp.server.auth.provider import TokenVerifier
 from mcp.server.auth.settings import AuthSettings
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, ToolAnnotations
 from pydantic import Field
 
@@ -21,6 +22,7 @@ from .mcp_output import (
     tool_result,
 )
 from .mcp_service import ReadOnlyRetrievalService
+from .project_config import ProjectConfigError
 from .filesystem_view import browse_markdown_workspace
 from .config_management import create_scope, delete_scope, describe_scope, update_scope
 from .cli_refresh import refresh_scope
@@ -59,7 +61,7 @@ def build_server(
 
     service = ReadOnlyRetrievalService.from_config(config_path)
     mcp = MCPServer(
-        "markdown-retrieval",
+        "mizuki-markdown-retrieval",
         instructions=(
             "Markdown workspace browsing and retrieval over an owner-configured local root. "
             "Browse directories and Markdown files, manage scopes inside that root, search indexed chunks, "
@@ -69,7 +71,7 @@ def build_server(
         auth=auth,
     )
     security_meta = _security_meta(security_scope)
-    manage_security_meta = _security_meta(manage_security_scope)
+    manage_security_meta = _security_meta(manage_security_scope or security_scope)
 
     @mcp.tool(
         title="Browse Markdown workspace",
@@ -94,48 +96,49 @@ def build_server(
             Field(description="compact is token-efficient default; use json only for exact structured metadata."),
         ] = "compact",
     ) -> CallToolResult:
-        payload = browse_markdown_workspace(
-            service.project,
-            path,
-            depth=depth,
-            limit=limit,
-            include_hidden=include_hidden,
-        )
+        try:
+            payload = browse_markdown_workspace(
+                service.project,
+                path,
+                depth=depth,
+                limit=limit,
+                include_hidden=include_hidden,
+            )
+        except (ProjectConfigError, FileNotFoundError, NotADirectoryError, ValueError) as exc:
+            raise ToolError(str(exc)) from exc
         return tool_result(payload, format_browse(payload), response_format=response_format)
 
-    # Remote scope mutation is opt-in. Local stdio owns the machine-local config
-    # boundary; HTTP exposes management only when a distinct OAuth scope is configured.
-    if token_verifier is None or manage_security_scope is not None:
-        @mcp.tool(
-            title="Manage Markdown scope",
-            description=(
-                "Get, create, update, delete, or refresh one Markdown retrieval scope. "
-                "Scope roots must remain inside the owner-configured workspace root; MCP cannot change that root. "
-                "Create inherits private SearchE/Postgres/model settings from an existing template scope and never exposes them."
-            ),
-            annotations=SCOPE_MANAGEMENT,
-            meta=manage_security_meta,
-        )
-        def manage_markdown_scope(
-            action: Literal["get", "create", "update", "delete", "refresh"],
-            name: Annotated[str, Field(min_length=1, max_length=128)],
-            root: Annotated[
-                str | None,
-                Field(max_length=2048, description="Relative directory under the configured workspace root."),
-            ] = None,
-            namespace: Annotated[str | None, Field(max_length=128)] = None,
-            recursive: bool | None = None,
-            mode: Literal["include_all_except", "include_only"] | None = None,
-            include: list[str] | None = None,
-            exclude: list[str] | None = None,
-            chunk_profile: str | None = None,
-            template_scope: Annotated[str | None, Field(max_length=128)] = None,
-            confirm: bool = False,
-            response_format: Annotated[
-                ResponseFormat,
-                Field(description="compact is token-efficient default; use json only for exact structured metadata."),
-            ] = "compact",
-        ) -> CallToolResult:
+    @mcp.tool(
+        title="Manage Markdown scope",
+        description=(
+            "Get, create, update, delete, or refresh one Markdown retrieval scope. "
+            "Scope roots must remain inside the owner-configured workspace root; MCP cannot change that root. "
+            "Create inherits private SearchE/Postgres/model settings from an existing template scope and never exposes them."
+        ),
+        annotations=SCOPE_MANAGEMENT,
+        meta=manage_security_meta,
+    )
+    def manage_markdown_scope(
+        action: Literal["get", "create", "update", "delete", "refresh"],
+        name: Annotated[str, Field(min_length=1, max_length=128)],
+        root: Annotated[
+            str | None,
+            Field(max_length=2048, description="Relative directory under the configured workspace root."),
+        ] = None,
+        namespace: Annotated[str | None, Field(max_length=128)] = None,
+        recursive: bool | None = None,
+        mode: Literal["include_all_except", "include_only"] | None = None,
+        include: list[str] | None = None,
+        exclude: list[str] | None = None,
+        chunk_profile: str | None = None,
+        template_scope: Annotated[str | None, Field(max_length=128)] = None,
+        confirm: bool = False,
+        response_format: Annotated[
+            ResponseFormat,
+            Field(description="compact is token-efficient default; use json only for exact structured metadata."),
+        ] = "compact",
+    ) -> CallToolResult:
+        try:
             if action == "get":
                 payload = {"action": action, **describe_scope(service.project, name)}
             elif action == "create":
@@ -186,6 +189,8 @@ def build_server(
                 runtime = service.project.get_scope(name)
                 payload = {"action": action, **refresh_scope(runtime)}
             return tool_result(payload, format_scope_management(payload), response_format=response_format)
+        except (ProjectConfigError, FileNotFoundError, NotADirectoryError, ValueError) as exc:
+            raise ToolError(str(exc)) from exc
 
     @mcp.tool(
         title="List Markdown scopes",
