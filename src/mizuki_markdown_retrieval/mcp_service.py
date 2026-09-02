@@ -6,8 +6,6 @@ from typing import Any, Literal
 from .discovery import discover_markdown
 from .postgres_runtime import database_url_from_env, open_postgres_search_provider
 from .project_config import ProjectConfig, ProjectConfigError, load_project_config
-from .scope_management import browse_markdown_tree, manage_scope as manage_scope_config
-from .cli_refresh import refresh_scope
 from .reading import read_markdown_view
 from .runtime import related_for_chunk
 from .source_resolver import resolve_source_chunk
