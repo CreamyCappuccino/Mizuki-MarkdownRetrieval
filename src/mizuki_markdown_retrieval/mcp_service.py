@@ -6,6 +6,8 @@ from typing import Any, Literal
 from .discovery import discover_markdown
 from .postgres_runtime import database_url_from_env, open_postgres_search_provider
 from .project_config import ProjectConfig, ProjectConfigError, load_project_config
+from .scope_management import browse_markdown_tree, manage_scope as manage_scope_config
+from .cli_refresh import refresh_scope
 from .reading import read_markdown_view
 from .runtime import related_for_chunk
 from .source_resolver import resolve_source_chunk
@@ -19,11 +21,17 @@ class ReadOnlyRetrievalService:
 
     def __init__(self, project: ProjectConfig):
         self.project = project
+        self.config_path = project.config_path
         self._search_providers: dict[tuple[str, str], Any] = {}
 
     @classmethod
     def from_config(cls, path: str | Path) -> "ReadOnlyRetrievalService":
         return cls(load_project_config(Path(path)))
+
+    def reload_project(self) -> ProjectConfig:
+        self.project = load_project_config(self.config_path)
+        self._search_providers.clear()
+        return self.project
 
     def list_scopes(self, *, limit: int = 50) -> dict[str, Any]:
         if not 1 <= limit <= 100:
