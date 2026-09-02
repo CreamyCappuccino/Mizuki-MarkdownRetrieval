@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from mcp.server import MCPServer
+from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver.exceptions import ToolError
@@ -141,6 +142,7 @@ def build_server(
                 Field(description="compact is token-efficient default; use json only for exact structured metadata."),
             ] = "compact",
         ) -> CallToolResult:
+            _require_scope(manage_security_scope)
             try:
                 if action == "get":
                     payload = {"action": action, **describe_scope(service.project, name)}
@@ -335,6 +337,14 @@ def _security_meta(scope: str | None) -> dict[str, object] | None:
             }
         ]
     }
+
+
+def _require_scope(required_scope: str | None) -> None:
+    if required_scope is None:
+        return
+    access_token = get_access_token()
+    if access_token is None or required_scope not in access_token.scopes:
+        raise ToolError(f"Required OAuth scope: {required_scope}")
 
 
 def main() -> None:

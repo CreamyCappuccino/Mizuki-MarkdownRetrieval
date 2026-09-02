@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 
 import uvicorn
 from mcp.server import MCPServer
+from mcp.server.auth.routes import build_resource_metadata_url
 from mcp.server.auth.provider import TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.transport_security import TransportSecuritySettings
@@ -147,6 +148,34 @@ class RemoteHttpSettings:
         )
 
 
+class _ProtectedResourceMetadataScopesApp:
+    """Advertise supported scopes without making every scope transport-required."""
+
+    def __init__(self, app: Any, *, settings: RemoteHttpSettings) -> None:
+        self.app = app
+        metadata_url = build_resource_metadata_url(AnyHttpUrl(settings.resource_url))
+        self.metadata_path = urlsplit(str(metadata_url)).path
+        self.payload = {
+            "resource": settings.resource_url,
+            "authorization_servers": [settings.issuer_url.rstrip("/") + "/"],
+            "scopes_supported": [
+                settings.required_scope,
+                *([settings.manage_scope] if settings.manage_scope is not None else []),
+            ],
+            "bearer_methods_supported": ["header"],
+        }
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if (
+            scope["type"] == "http"
+            and scope.get("method") == "GET"
+            and scope.get("path") == self.metadata_path
+        ):
+            await JSONResponse(self.payload)(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+
 def build_http_server(
     config_path: str | Path,
     *,
@@ -158,10 +187,7 @@ def build_http_server(
     auth = AuthSettings(
         issuer_url=AnyHttpUrl(settings.issuer_url),
         resource_server_url=AnyHttpUrl(settings.resource_url),
-        required_scopes=[
-            settings.required_scope,
-            *([settings.manage_scope] if settings.manage_scope is not None else []),
-        ],
+        required_scopes=[settings.required_scope],
     )
     server = build_server(
         config_path,
@@ -226,6 +252,7 @@ def build_http_app(
         mcp_path=settings.mcp_path,
         controller=controller,
     )
+    raw_app = _ProtectedResourceMetadataScopesApp(raw_app, settings=settings)
     app = BoundedRequestApp(
         raw_app,
         mcp_path=settings.mcp_path,
