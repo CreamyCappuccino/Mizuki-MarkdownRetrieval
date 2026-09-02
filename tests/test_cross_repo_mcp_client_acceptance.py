@@ -125,6 +125,8 @@ def test_real_pgvector_index_through_mcp_client_literal_semantic_hybrid_and_read
             async with Client(server) as client:
                 tools = await client.list_tools()
                 assert [tool.name for tool in tools.tools] == [
+                    "browse_markdown_filesystem",
+                    "manage_markdown_scope",
                     "list_markdown_scopes",
                     "list_markdown_files",
                     "search_related_markdown",
