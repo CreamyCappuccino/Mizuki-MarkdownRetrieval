@@ -10,7 +10,7 @@ from .remote_auth import RemoteOAuthConfig, SharedOAuthJWTVerifier
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="mizuki-mdr-remote",
+        prog="mdr-remote",
         description="Run the loopback-only MDR Shared OAuth HTTP resource server",
     )
     parser.add_argument(
