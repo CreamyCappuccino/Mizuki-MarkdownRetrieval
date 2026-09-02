@@ -71,6 +71,15 @@ The TOML stores only the **name** of the environment variable containing the dat
 
 ## Project configuration
 
+MDR has one owner-controlled workspace root. Local CLI can change it; remote MCP tools can browse and create scopes only underneath it and cannot widen it:
+
+```toml
+[workspace]
+root = "/absolute/path/to/your/workspace"
+```
+
+If `[workspace]` is absent, MDR derives a conservative root from the configured scope roots. Set it explicitly for filesystem browsing and MCP-managed scope creation.
+
 Example scope:
 
 ```toml
@@ -118,12 +127,33 @@ Each scope gets its own PostgreSQL schema. `vector_dimensions` must match the se
 
 ## CLI
 
+The neutral OSS-facing command is `mdr`. The older `mizuki-mdr` entry point remains as a compatibility alias during migration.
+
+Set or inspect the local workspace root, then browse directories and Markdown files:
+
+```bash
+mdr --config markdown-retrieval.toml root show
+mdr --config markdown-retrieval.toml root set /Users/me/DevSpace
+mdr --config markdown-retrieval.toml browse projects --depth 2
+```
+
+Manage scopes locally:
+
+```bash
+mdr --config markdown-retrieval.toml scope list
+mdr --config markdown-retrieval.toml scope create trading projects/ai-trading-simulation --exclude 'archive/**'
+mdr --config markdown-retrieval.toml scope update trading --no-recursive
+mdr --config markdown-retrieval.toml scope delete trading --yes
+```
+
+New scopes inherit private SearchE/Postgres/model settings from an existing searchable scope by default; a unique PostgreSQL schema is generated for the new scope. These private runtime details do not need to be supplied by MCP callers.
+
 Validate and inspect source scopes:
 
 ```bash
-mizuki-mdr --config markdown-retrieval.toml validate
-mizuki-mdr --config markdown-retrieval.toml discover rules
-mizuki-mdr --config markdown-retrieval.toml plan rules
+mdr --config markdown-retrieval.toml validate
+mdr --config markdown-retrieval.toml discover rules
+mdr --config markdown-retrieval.toml plan rules
 ```
 
 `plan` is read-only and never advances committed refresh state.
@@ -133,7 +163,7 @@ mizuki-mdr --config markdown-retrieval.toml plan rules
 `refresh` is the one explicit durable-index mutation command:
 
 ```bash
-mizuki-mdr --config markdown-retrieval.toml refresh rules
+mdr --config markdown-retrieval.toml refresh rules
 ```
 
 It uses only the selected scope's owner-controlled configuration:
@@ -148,7 +178,7 @@ If PostgreSQL/state drift is detected, refresh fails closed. If committed state 
 ### Safe Markdown reads
 
 ```bash
-mizuki-mdr --config markdown-retrieval.toml read rules docs/rules.md \
+mdr --config markdown-retrieval.toml read rules docs/rules.md \
   --view around --line-start 120 --line-end 125 --context-lines 20
 ```
 
@@ -157,7 +187,7 @@ mizuki-mdr --config markdown-retrieval.toml read rules docs/rules.md \
 Search uses the durable PostgreSQL/pgvector runtime configured in TOML. There are no CLI flags for database URL, schema, model path, or provider revision.
 
 ```bash
-mizuki-mdr --config markdown-retrieval.toml search rules \
+mdr --config markdown-retrieval.toml search rules \
   --mode hybrid \
   --path docs/rules.md \
   --line 123 \
@@ -167,7 +197,7 @@ mizuki-mdr --config markdown-retrieval.toml search rules \
 Machine callers may select a current source chunk by identity:
 
 ```bash
-mizuki-mdr --config markdown-retrieval.toml search rules \
+mdr --config markdown-retrieval.toml search rules \
   --mode semantic \
   --document-id '<document-id>' \
   --chunk-id '<chunk-id>' \
@@ -177,24 +207,35 @@ mizuki-mdr --config markdown-retrieval.toml search rules \
 
 Modes are `semantic`, `literal`, and `hybrid`. Literal search does not load the embedding model. Semantic and hybrid use the configured Ruri runtime.
 
+## MCP
+
+MDR v1.1 adds two high-leverage tools without exposing arbitrary host control:
+
+- `browse_markdown_filesystem`: ls-like browsing of directories plus `.md` files under the locally configured workspace root. Paths are root-relative and symlinks are not followed.
+- `manage_markdown_scope`: one action-based tool (`get`, `create`, `update`, `delete`, `refresh`) for scope lifecycle. It cannot change the workspace root.
+
+The existing retrieval tools remain available. Compact output is still the default; use `response_format=json` only when exact structured metadata is required.
+
 ## MCP server
 
 Run the local stdio MCP server:
 
 ```bash
-mizuki-mdr-mcp --config markdown-retrieval.toml
+mdr-mcp --config markdown-retrieval.toml
 ```
 
 Exposed tools:
 
+- `browse_markdown_filesystem` — ls-like directory + `.md` browsing below the owner-configured workspace root.
+- `manage_markdown_scope` — action-based `get | create | update | delete | refresh` scope management.
 - `list_markdown_scopes` — bounded scope inventory without filesystem/database secrets.
 - `list_markdown_files` — bounded file paths inside one configured scope.
 - `search_related_markdown` — `semantic | literal | hybrid` related-document search from `path+line` or `document_id+chunk_id`.
 - `read_markdown` — bounded `hit | around | full` source reads.
 
-All four tools advertise `readOnlyHint=true`, `destructiveHint=false`, `idempotentHint=true`, and `openWorldHint=false`. Safety is also enforced by server-side scope/path validation and a read-only PostgreSQL provider for MCP/search requests.
+Browse/list/search/read tools remain read-only and closed-world. `manage_markdown_scope` is explicitly mutating/destructive-capable because its action set includes create/update/delete/refresh. The owner-configured workspace root is not mutable through MCP.
 
-The MCP surface never accepts arbitrary filesystem roots, database URLs, schemas, model paths, provider revisions, or refresh mutation as tool inputs. Those runtime details are fixed by owner configuration. Normal MCP `content` is compact model-facing text while full payloads remain in `structuredContent`.
+The MCP surface never accepts an alternate workspace root, database URL, schema, model path, or provider revision. New scopes inherit those private search settings from an owner-configured template scope, while their schema is generated internally. Compact text is the default response; `response_format=json` returns structured content only, never a duplicate compact+JSON pair.
 
 Remote HTTP/Shared OAuth has a separately accepted local implementation. The current production binding is **M4 local-first**: M4 owns source/index/refresh/runtime authority and is the sole writer, while M1 is a verified backup/cold standby with its service/listener off and no automatic or silent failover. Public Cloudflare/DNS/Tunnel/Shared OAuth registration and real-client acceptance remain behind `docs/public_http_oauth_publication_gate.md`.
 
