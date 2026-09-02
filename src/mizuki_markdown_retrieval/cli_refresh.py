@@ -18,28 +18,44 @@ class DurableIndexDriftError(RuntimeError):
     pass
 
 
+def refresh_scope(
+    runtime: RuntimeScope,
+    *,
+    toolkit: Any | None = None,
+) -> dict[str, object]:
+    """Build/apply one durable pgvector refresh and return its compact receipt payload."""
+
+    with exclusive_refresh_lock(runtime.state_path):
+        return _refresh_scope_locked(runtime, toolkit=toolkit)
+
+
 def run_refresh_command(
     runtime: RuntimeScope,
     *,
     json_output: bool = False,
     toolkit: Any | None = None,
 ) -> int:
-    """Build/apply one durable pgvector index refresh from the configured scope."""
+    """CLI wrapper around :func:`refresh_scope`."""
 
-    with exclusive_refresh_lock(runtime.state_path):
-        return _run_refresh_locked(
-            runtime,
-            json_output=json_output,
-            toolkit=toolkit,
+    payload = refresh_scope(runtime, toolkit=toolkit)
+    if json_output:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(
+            f"scope={payload['scope']} namespace={payload['namespace']} "
+            f"files={payload['discovered_count']} changed={payload['changed_count']} "
+            f"status={payload['status']} state=committed"
         )
+        if payload["apply_id"] is not None:
+            print(f"apply_id={payload['apply_id']}")
+    return 0
 
 
-def _run_refresh_locked(
+def _refresh_scope_locked(
     runtime: RuntimeScope,
     *,
-    json_output: bool,
     toolkit: Any | None,
-) -> int:
+) -> dict[str, object]:
     search = runtime.search
     if search is None:
         raise ProjectConfigError(f"search runtime is not configured for scope: {runtime.name}")
@@ -102,18 +118,7 @@ def _run_refresh_locked(
         provider=provider,
         toolkit=toolkit,
     )
-    payload = _refresh_payload(runtime.name, refresh, result)
-    if json_output:
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
-    else:
-        print(
-            f"scope={payload['scope']} namespace={payload['namespace']} "
-            f"files={payload['discovered_count']} changed={payload['changed_count']} "
-            f"status={payload['status']} state=committed"
-        )
-        if payload["apply_id"] is not None:
-            print(f"apply_id={payload['apply_id']}")
-    return 0
+    return _refresh_payload(runtime.name, refresh, result)
 
 
 def _baseline_provider_revision(
