@@ -7,7 +7,7 @@ from pathlib import Path
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mdr",
-        description="Browse, manage, refresh, and search Markdown retrieval scopes.",
+        description="Browse, manage, refresh, and query Markdown retrieval scopes.",
     )
     parser.add_argument(
         "--config",
@@ -18,42 +18,51 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("validate", help="validate the project config")
 
-    root = subparsers.add_parser("root", help="manage the machine-local MCP browse root")
-    root_sub = root.add_subparsers(dest="root_action", required=True)
-    root_sub.add_parser("show", help="show whether a browse root is configured")
-    root_set = root_sub.add_parser("set", help="set the local browse root; MCP cannot change it")
-    root_set.add_argument("path", help="local filesystem directory used as the browse boundary")
-    root_set.add_argument("--template-scope", help="base scope whose search/index settings new scopes inherit")
-    root_set.add_argument("--include-hidden", action=argparse.BooleanOptionalAction, default=False)
-    root_set.add_argument("--managed-scopes-path", help="optional local managed-scope TOML path")
+    root = subparsers.add_parser("root", help="show or change the local workspace browse root")
+    root_sub = root.add_subparsers(dest="root_command", required=True)
+    root_sub.add_parser("show", help="show the effective workspace root")
+    root_set = root_sub.add_parser("set", help="set the workspace root in local config")
+    root_set.add_argument("path", help="local directory to expose beneath MDR")
 
-    browse = subparsers.add_parser("browse", help="list directories and Markdown files below the local browse root")
-    browse.add_argument("path", nargs="?", default=".", help="path relative to the configured browse root")
-    browse.add_argument("--limit", type=int, default=100)
+    browse = subparsers.add_parser("browse", help="list directories and Markdown files under workspace root")
+    browse.add_argument("path", nargs="?", default=".", help="relative path under workspace root")
+    browse.add_argument("--depth", type=int, default=1, help="recursive directory depth (0-5)")
+    browse.add_argument("--limit", type=int, default=100, help="max returned items (1-500)")
+    browse.add_argument("--hidden", action="store_true", help="include hidden entries")
     browse.add_argument("--json", action="store_true")
 
-    scope = subparsers.add_parser("scope", help="manage scopes stored in the local managed-scope file")
-    scope_sub = scope.add_subparsers(dest="scope_action", required=True)
-    scope_sub.add_parser("list", help="list configured scopes")
-
-    create = scope_sub.add_parser("create", help="create a managed scope")
-    create.add_argument("name")
-    create.add_argument("root", help="directory below the configured browse root")
-    _add_scope_fields(create, updating=False)
-
-    update = scope_sub.add_parser("update", help="update a managed scope")
-    update.add_argument("name")
-    update.add_argument("--root", help="new directory below the configured browse root")
-    _add_scope_fields(update, updating=True)
-
-    delete = scope_sub.add_parser("delete", help="remove a managed scope from exposure/config")
-    delete.add_argument("name")
-    delete.add_argument("--confirm", action="store_true", help="required destructive confirmation")
-    delete.add_argument("--json", action="store_true")
-
-    scope_refresh = scope_sub.add_parser("refresh", help="refresh one configured scope")
-    scope_refresh.add_argument("name")
-    scope_refresh.add_argument("--json", action="store_true")
+    scope = subparsers.add_parser("scope", help="manage configured retrieval scopes")
+    scope_sub = scope.add_subparsers(dest="scope_command", required=True)
+    scope_sub.add_parser("list", help="list scope names")
+    scope_show = scope_sub.add_parser("show", help="show one scope")
+    scope_show.add_argument("name")
+    scope_create = scope_sub.add_parser("create", help="create a scope inside the workspace root")
+    scope_create.add_argument("name")
+    scope_create.add_argument("root", help="relative or absolute directory inside workspace root")
+    scope_create.add_argument("--namespace")
+    scope_create.add_argument("--recursive", dest="recursive", action="store_true", default=True)
+    scope_create.add_argument("--no-recursive", dest="recursive", action="store_false")
+    scope_create.add_argument("--mode", choices=("include_all_except", "include_only"), default="include_all_except")
+    scope_create.add_argument("--include", action="append", default=[])
+    scope_create.add_argument("--exclude", action="append", default=[])
+    scope_create.add_argument("--chunk-profile")
+    scope_create.add_argument("--template-scope")
+    scope_create.add_argument("--json", action="store_true")
+    scope_update = scope_sub.add_parser("update", help="update one scope")
+    scope_update.add_argument("name")
+    scope_update.add_argument("--root")
+    scope_update.add_argument("--namespace")
+    scope_update.add_argument("--recursive", dest="recursive", action="store_const", const=True)
+    scope_update.add_argument("--no-recursive", dest="recursive", action="store_const", const=False)
+    scope_update.add_argument("--mode", choices=("include_all_except", "include_only"))
+    scope_update.add_argument("--include", action="append")
+    scope_update.add_argument("--exclude", action="append")
+    scope_update.add_argument("--chunk-profile")
+    scope_update.add_argument("--json", action="store_true")
+    scope_delete = scope_sub.add_parser("delete", help="remove a scope from config; durable data is preserved")
+    scope_delete.add_argument("name")
+    scope_delete.add_argument("--yes", action="store_true", help="confirm deletion without prompting")
+    scope_delete.add_argument("--json", action="store_true")
 
     discover = subparsers.add_parser("discover", help="list indexed Markdown files")
     discover.add_argument("scope", help="scope name from config")
@@ -94,21 +103,6 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--candidate-k", type=int, help="pre-group similarity candidate count")
     search.add_argument("--json", action="store_true")
     return parser
-
-
-def _add_scope_fields(parser: argparse.ArgumentParser, *, updating: bool) -> None:
-    parser.add_argument("--namespace")
-    parser.add_argument(
-        "--recursive",
-        action=argparse.BooleanOptionalAction,
-        default=None if updating else True,
-    )
-    parser.add_argument("--mode", choices=("include_all_except", "include_only"))
-    parser.add_argument("--include", action="append", help="include glob; repeatable")
-    parser.add_argument("--exclude", action="append", help="exclude glob; repeatable")
-    parser.add_argument("--chunk-profile")
-    parser.add_argument("--template-scope")
-    parser.add_argument("--json", action="store_true")
 
 
 def validate_search_selector(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
