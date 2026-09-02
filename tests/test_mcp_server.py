@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
+
 from mcp.types import TextContent
 
 from mizuki_markdown_retrieval.mcp_server import build_server
@@ -167,5 +169,10 @@ def test_mcp_browse_and_scope_create_are_workspace_bounded(tmp_path: Path) -> No
     scopes = asyncio.run(server.call_tool("list_markdown_scopes", {}))
     assert "alpha" in scopes.content[0].text
 
-    escaped = asyncio.run(server.call_tool("manage_markdown_scope", {"action": "create", "name": "escape", "root": "../outside"}))
-    assert escaped.is_error is True
+    with pytest.raises(Exception, match="Error executing tool manage_markdown_scope"):
+        asyncio.run(
+            server.call_tool(
+                "manage_markdown_scope",
+                {"action": "create", "name": "escape", "root": "../outside"},
+            )
+        )
