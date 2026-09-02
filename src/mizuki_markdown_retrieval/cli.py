@@ -7,6 +7,8 @@ from typing import Sequence
 from .cli_output import plan_payload, print_search_payload
 from .cli_parser import build_parser, validate_search_selector
 from .cli_refresh import run_refresh_command
+from .config_management import create_scope, delete_scope, describe_scope, set_workspace_root, update_scope
+from .filesystem_view import browse_markdown_workspace
 from .discovery import discover_markdown
 from .indexing import UNSPECIFIED_PROVIDER_REVISION
 from .mcp_service import ReadOnlyRetrievalService
@@ -18,11 +20,82 @@ from .refresh import prepare_refresh
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    project = load_project_config(Path(args.config))
+    config_path = Path(args.config)
+    project = load_project_config(config_path)
 
     if args.command == "validate":
         print(f"config ok: {project.config_path}")
         print("scopes: " + ", ".join(sorted(project.scopes)))
+        return 0
+
+    if args.command == "root":
+        if args.root_command == "show":
+            print(project.workspace_root)
+            return 0
+        resolved = set_workspace_root(config_path, args.path)
+        print(f"workspace root={resolved}")
+        return 0
+
+    if args.command == "browse":
+        payload = browse_markdown_workspace(
+            project,
+            args.path,
+            depth=args.depth,
+            limit=args.limit,
+            include_hidden=args.hidden,
+        )
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(
+                f"path={payload['path']} depth={payload['depth']} items={payload['count']} "
+                f"truncated={str(payload['truncated']).lower()}"
+            )
+            for item in payload["items"]:
+                print(f"[{item['type']}] {item['path']}")
+        return 0
+
+    if args.command == "scope":
+        if args.scope_command == "list":
+            for name in sorted(project.scopes):
+                print(name)
+            return 0
+        if args.scope_command == "show":
+            payload = describe_scope(project, args.name)
+        elif args.scope_command == "create":
+            payload = create_scope(
+                config_path,
+                name=args.name,
+                root=args.root,
+                namespace=args.namespace,
+                recursive=args.recursive,
+                mode=args.mode,
+                include=args.include,
+                exclude=args.exclude,
+                chunk_profile=args.chunk_profile,
+                template_scope=args.template_scope,
+            )
+        elif args.scope_command == "update":
+            payload = update_scope(
+                config_path,
+                name=args.name,
+                root=args.root,
+                namespace=args.namespace,
+                recursive=args.recursive,
+                mode=args.mode,
+                include=args.include,
+                exclude=args.exclude,
+                chunk_profile=args.chunk_profile,
+            )
+        else:
+            if not args.yes:
+                parser.error("scope delete requires --yes")
+            payload = delete_scope(config_path, name=args.name)
+        if getattr(args, "json", False):
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            for key, value in payload.items():
+                print(f"{key}={value}")
         return 0
 
     runtime = project.get_scope(args.scope)
