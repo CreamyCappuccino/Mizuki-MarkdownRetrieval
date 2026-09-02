@@ -46,12 +46,14 @@ SCOPE_MANAGEMENT = ToolAnnotations(
 class ToolOutputEnvelope(BaseModel):
     """Minimal structured envelope advertised through MCP outputSchema.
 
-    Compact mode keeps substantive data in TextContent and publishes only the format marker.
-    JSON mode keeps the existing top-level payload and adds the same marker.
+    Compact mode publishes one concise text field in structured content so clients that
+    prefer structuredContent do not lose the result. JSON mode keeps the existing
+    top-level payload and adds the same format marker.
     """
 
     model_config = ConfigDict(extra="allow")
     format: Literal["compact", "json"]
+    text: str | None = None
 
 
 def build_server(
