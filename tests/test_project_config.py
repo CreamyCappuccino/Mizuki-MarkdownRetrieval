@@ -97,3 +97,21 @@ root = "."
 
     with pytest.raises(ProjectConfigError, match="duplicate scope name"):
         load_project_config(config_path)
+
+
+def test_workspace_root_is_explicit_or_derived_from_scope_roots(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    docs = workspace / "docs"
+    docs.mkdir(parents=True)
+    config = tmp_path / "markdown-retrieval.toml"
+    config.write_text(
+        f'''[workspace]\nroot = "{workspace.as_posix()}"\n\n[[scope]]\nname = "demo"\nnamespace = "demo"\nroot = "{docs.as_posix()}"\n''',
+        encoding="utf-8",
+    )
+    assert load_project_config(config).workspace_root == workspace.resolve()
+
+    config.write_text(
+        f'''[[scope]]\nname = "demo"\nnamespace = "demo"\nroot = "{docs.as_posix()}"\n''',
+        encoding="utf-8",
+    )
+    assert load_project_config(config).workspace_root == docs.resolve()
