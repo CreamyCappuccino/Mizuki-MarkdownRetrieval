@@ -259,3 +259,18 @@ def test_cli_search_rejects_runtime_override_flags(tmp_path: Path) -> None:
                 "other.sqlite3",
             ]
         )
+
+
+def test_cli_root_set_and_browse(tmp_path: Path, capsys) -> None:
+    config = _config(tmp_path)
+    workspace = tmp_path
+    assert main(["--config", str(config), "root", "set", str(workspace)]) == 0
+    assert "workspace root=" in capsys.readouterr().out
+
+    project_dir = workspace / "projects" / "alpha"
+    project_dir.mkdir(parents=True)
+    (project_dir / "README.md").write_text("# alpha\n", encoding="utf-8")
+    assert main(["--config", str(config), "browse", "projects", "--depth", "2"]) == 0
+    output = capsys.readouterr().out
+    assert "[dir] projects/alpha" in output
+    assert "[md] projects/alpha/README.md" in output
