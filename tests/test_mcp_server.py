@@ -25,26 +25,19 @@ def test_mcp_tools_have_explicit_read_only_local_annotations(tmp_path: Path) -> 
     tools = asyncio.run(server.list_tools())
 
     assert [tool.name for tool in tools] == [
-        "browse_markdown_tree",
         "list_markdown_scopes",
         "list_markdown_files",
         "search_related_markdown",
         "read_markdown",
-        "manage_markdown_scope",
     ]
     for tool in tools:
         assert tool.title
         assert tool.description
         assert tool.annotations is not None
+        assert tool.annotations.read_only_hint is True
+        assert tool.annotations.destructive_hint is False
+        assert tool.annotations.idempotent_hint is True
         assert tool.annotations.open_world_hint is False
-        if tool.name == "manage_markdown_scope":
-            assert tool.annotations.read_only_hint is False
-            assert tool.annotations.destructive_hint is True
-            assert tool.annotations.idempotent_hint is False
-        else:
-            assert tool.annotations.read_only_hint is True
-            assert tool.annotations.destructive_hint is False
-            assert tool.annotations.idempotent_hint is True
 
 
 def test_mcp_search_schema_is_constrained(tmp_path: Path) -> None:
@@ -125,15 +118,3 @@ def test_mcp_read_tool_json_is_explicit_and_not_duplicated_as_text(tmp_path: Pat
     assert result.structured_content["line_start"] == 2
     assert result.structured_content["line_end"] == 2
     assert result.structured_content["text"] == "keep this aligned\n"
-
-
-def test_mcp_manage_scope_schema_collapses_crud_actions(tmp_path: Path) -> None:
-    server = build_server(_config(tmp_path))
-    tools = asyncio.run(server.list_tools())
-    manage = next(tool for tool in tools if tool.name == "manage_markdown_scope")
-    props = manage.input_schema["properties"]
-
-    assert props["action"]["enum"] == ["create", "update", "delete", "refresh"]
-    assert "root" in props
-    assert "confirm" in props
-    assert props["response_format"]["default"] == "compact"
