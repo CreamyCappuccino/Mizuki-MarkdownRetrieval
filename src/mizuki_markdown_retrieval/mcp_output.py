@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from mcp.types import CallToolResult, TextContent
+from mcp.types import CallToolResult
 
 
 ResponseFormat = Literal["compact", "json"]
@@ -18,8 +18,8 @@ def tool_result(
 
     if response_format == "compact":
         return CallToolResult(
-            content=[TextContent(type="text", text=text)],
-            structured_content={"format": "compact"},
+            content=[],
+            structured_content={"format": "compact", "text": text},
         )
     if response_format == "json":
         return CallToolResult(content=[], structured_content={"format": "json", **payload})
