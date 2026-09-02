@@ -25,6 +25,13 @@ class StaticVerifier(TokenVerifier):
                 scopes=["markdown:read"],
                 resource=RESOURCE,
             )
+        if token == "full":
+            return AccessToken(
+                token=token,
+                client_id="client-1",
+                scopes=["markdown:read", "markdown:manage"],
+                resource=RESOURCE,
+            )
         if token == "wrong-scope":
             return AccessToken(
                 token=token,
@@ -175,3 +182,76 @@ def test_hung_readiness_is_bounded_and_single_flight_after_authorization(
 
     asyncio.run(scenario())
     assert calls == 1
+
+
+def test_not_ready_keeps_protocol_and_scope_management_repair_plane_open(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        mcp_http,
+        "safe_check_readiness",
+        lambda *args, **kwargs: ReadinessReport(
+            False,
+            1,
+            (ReadinessIssue("demo", "refresh_required"),),
+        ),
+    )
+    settings = RemoteHttpSettings(
+        issuer_url="https://oauth.example.test",
+        resource_url=RESOURCE,
+        required_scope="markdown:read",
+        manage_scope="markdown:manage",
+        readiness_cache_ttl_seconds=0.1,
+    )
+    server, app = build_http_app(
+        _config(tmp_path),
+        token_verifier=StaticVerifier(),
+        settings=settings,
+    )
+
+    async def scenario() -> None:
+        transport = httpx2.ASGITransport(app=app)
+        headers = {"Authorization": "Bearer full"}
+        async with server.session_manager.run():
+            async with httpx2.AsyncClient(
+                transport=transport,
+                base_url="https://mdr.test",
+                headers=headers,
+            ) as http:
+                blocked = await http.post(
+                    "/mcp",
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "list_markdown_scopes",
+                            "arguments": {"limit": 10},
+                        },
+                    },
+                )
+                assert blocked.status_code == 503
+
+            async with httpx2.AsyncClient(
+                transport=transport,
+                base_url="https://mdr.test",
+                headers=headers,
+            ) as full_http:
+                async with Client(
+                    streamable_http_client(RESOURCE, http_client=full_http)
+                ) as client:
+                    tools = await client.list_tools()
+                    assert "manage_markdown_scope" in {tool.name for tool in tools.tools}
+                    repair = await client.call_tool(
+                        "manage_markdown_scope",
+                        {
+                            "action": "get",
+                            "name": "demo",
+                            "response_format": "json",
+                        },
+                    )
+                    assert repair.is_error is False
+                    assert repair.structured_content["scope"] == "demo"
+
+    asyncio.run(scenario())
