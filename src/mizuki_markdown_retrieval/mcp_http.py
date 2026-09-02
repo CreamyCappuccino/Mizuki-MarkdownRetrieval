@@ -47,6 +47,7 @@ class RemoteHttpSettings:
     request_timeout_seconds: float = 30.0
     readiness_timeout_seconds: float = 2.0
     readiness_cache_ttl_seconds: float = 2.0
+    manage_scope: str | None = None
 
     def __post_init__(self) -> None:
         if self.host not in {"127.0.0.1", "localhost", "::1"}:
@@ -55,6 +56,11 @@ class RemoteHttpSettings:
             raise ValueError("port must be between 1 and 65535")
         if not self.required_scope.strip():
             raise ValueError("required_scope must not be blank")
+        if self.manage_scope is not None:
+            if not self.manage_scope.strip():
+                raise ValueError("manage_scope must not be blank")
+            if self.manage_scope == self.required_scope:
+                raise ValueError("manage_scope must differ from required_scope")
         if not self.mcp_path.startswith("/"):
             raise ValueError("mcp_path must start with /")
         if not 4_096 <= self.max_request_body_size <= 1_048_576:
@@ -99,6 +105,7 @@ class RemoteHttpSettings:
             issuer_url=oauth.issuer,
             resource_url=oauth.resource,
             required_scope=oauth.required_scope,
+            manage_scope=oauth.manage_scope,
             host=host,
             port=port,
             mcp_path=resource_path,
@@ -151,13 +158,17 @@ def build_http_server(
     auth = AuthSettings(
         issuer_url=AnyHttpUrl(settings.issuer_url),
         resource_server_url=AnyHttpUrl(settings.resource_url),
-        required_scopes=[settings.required_scope],
+        required_scopes=[
+            settings.required_scope,
+            *([settings.manage_scope] if settings.manage_scope is not None else []),
+        ],
     )
     server = build_server(
         config_path,
         token_verifier=token_verifier,
         auth=auth,
         security_scope=settings.required_scope,
+        manage_security_scope=settings.manage_scope,
     )
 
     controller = readiness_controller or ReadinessProbeController(
