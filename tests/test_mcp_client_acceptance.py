@@ -6,7 +6,6 @@ import sys
 
 from mcp import Client, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from mcp.types import TextContent
 
 from mizuki_markdown_retrieval.mcp_server import build_server
 
@@ -25,10 +24,10 @@ def _config(tmp_path: Path) -> Path:
 
 def _assert_sanitized_provider_failure(result) -> None:
     assert result.is_error is False
-    assert result.structured_content == {"format": "compact"}
-    rendered = "\n".join(
-        item.text for item in result.content if isinstance(item, TextContent)
-    )
+    assert result.content == []
+    assert result.structured_content is not None
+    assert result.structured_content["format"] == "compact"
+    rendered = result.structured_content["text"]
     assert "provider_unavailable" in rendered
     assert "MDR_TEST_MISSING_DATABASE_URL" not in rendered
     assert "mdr_demo" not in rendered
@@ -55,18 +54,20 @@ def test_in_memory_mcp_client_accepts_read_only_surface_and_missing_db_fails_clo
 
             scopes = await client.call_tool("list_markdown_scopes", {"limit": 10})
             assert scopes.is_error is False
-            assert scopes.structured_content == {"format": "compact"}
-            assert isinstance(scopes.content[0], TextContent)
-            assert scopes.content[0].text.startswith("scopes=1 truncated=false")
+            assert scopes.content == []
+            assert scopes.structured_content is not None
+            assert scopes.structured_content["format"] == "compact"
+            assert scopes.structured_content["text"].startswith("scopes=1 truncated=false")
 
             files = await client.call_tool(
                 "list_markdown_files",
                 {"scope": "demo", "limit": 10},
             )
             assert files.is_error is False
-            assert files.structured_content == {"format": "compact"}
-            assert isinstance(files.content[0], TextContent)
-            assert "rules.md" in files.content[0].text
+            assert files.content == []
+            assert files.structured_content is not None
+            assert files.structured_content["format"] == "compact"
+            assert "rules.md" in files.structured_content["text"]
 
             read = await client.call_tool(
                 "read_markdown",
@@ -79,9 +80,10 @@ def test_in_memory_mcp_client_accepts_read_only_surface_and_missing_db_fails_clo
                 },
             )
             assert read.is_error is False
-            assert read.structured_content == {"format": "compact"}
-            assert isinstance(read.content[0], TextContent)
-            assert "keep this aligned" in read.content[0].text
+            assert read.content == []
+            assert read.structured_content is not None
+            assert read.structured_content["format"] == "compact"
+            assert "keep this aligned" in read.structured_content["text"]
 
             read_json = await client.call_tool(
                 "read_markdown",
@@ -155,9 +157,10 @@ def test_stdio_mcp_client_launches_real_server_process_and_reads_safely(tmp_path
                 },
             )
             assert read.is_error is False
-            assert read.structured_content == {"format": "compact"}
-            assert isinstance(read.content[0], TextContent)
-            assert read.content[0].text.startswith(
+            assert read.content == []
+            assert read.structured_content is not None
+            assert read.structured_content["format"] == "compact"
+            assert read.structured_content["text"].startswith(
                 "scope=demo path=rules.md view=around lines=1-2/2 truncated=false"
             )
 
