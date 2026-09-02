@@ -10,13 +10,29 @@ from mcp.server.auth.settings import AuthSettings
 from mcp.types import CallToolResult, ToolAnnotations
 from pydantic import Field
 
-from .mcp_output import ResponseFormat, format_files, format_read, format_scopes, format_search, tool_result
+from .mcp_output import (
+    ResponseFormat,
+    format_browse,
+    format_files,
+    format_manage,
+    format_read,
+    format_scopes,
+    format_search,
+    tool_result,
+)
 from .mcp_service import ReadOnlyRetrievalService
 
 READ_ONLY_LOCAL = ToolAnnotations(
     read_only_hint=True,
     destructive_hint=False,
     idempotent_hint=True,
+    open_world_hint=False,
+)
+
+MANAGE_LOCAL = ToolAnnotations(
+    read_only_hint=False,
+    destructive_hint=True,
+    idempotent_hint=False,
     open_world_hint=False,
 )
 
@@ -27,6 +43,7 @@ def build_server(
     token_verifier: TokenVerifier | None = None,
     auth: AuthSettings | None = None,
     security_scope: str | None = None,
+    manage_security_scope: str | None = None,
 ) -> MCPServer:
     """Build the read-only Markdown Retrieval MCP server.
 
@@ -39,16 +56,41 @@ def build_server(
 
     service = ReadOnlyRetrievalService.from_config(config_path)
     mcp = MCPServer(
-        "mizuki-markdown-retrieval",
+        "markdown-retrieval",
         instructions=(
-            "Read-only Markdown retrieval over configured local scopes. "
-            "Use search_related_markdown to find related rule/document chunks and "
-            "read_markdown to inspect bounded source text."
+            "Markdown retrieval over machine-local configured scopes. Browse is bounded by "
+            "a root chosen locally; remote callers cannot change that root. Use "
+            "browse_markdown_tree to discover directories/Markdown files, "
+            "manage_markdown_scope to create/update/delete/refresh scopes when management "
+            "is enabled, search_related_markdown for indexed retrieval, and read_markdown "
+            "for bounded source text."
         ),
         token_verifier=token_verifier,
         auth=auth,
     )
     security_meta = _security_meta(security_scope)
+    manage_security_meta = _security_meta(manage_security_scope)
+
+    @mcp.tool(
+        title="Browse Markdown tree",
+        description=(
+            "List directories and Markdown files below the machine-local browse root. "
+            "The root itself is configured locally and cannot be changed through MCP. "
+            "Paths are relative to that root; traversal and symlink escape are rejected."
+        ),
+        annotations=READ_ONLY_LOCAL,
+        meta=security_meta,
+    )
+    def browse_markdown_tree(
+        path: Annotated[str, Field(min_length=1, max_length=2048)] = ".",
+        limit: Annotated[int, Field(ge=1, le=500)] = 100,
+        response_format: Annotated[
+            ResponseFormat,
+            Field(description="compact is token-efficient default; use json for structured metadata."),
+        ] = "compact",
+    ) -> CallToolResult:
+        payload = service.browse(path=path, limit=limit)
+        return tool_result(payload, format_browse(payload), response_format=response_format)
 
     @mcp.tool(
         title="List Markdown scopes",
@@ -173,6 +215,55 @@ def build_server(
             max_chars=max_chars,
         )
         return tool_result(payload, format_read(payload), response_format=response_format)
+
+
+    # Remote scope mutation is opt-in: the HTTP wrapper must provide a distinct
+    # management OAuth scope. Local stdio can use it immediately because the
+    # machine-local process already owns the config boundary.
+    if token_verifier is None or manage_security_scope is not None:
+
+        @mcp.tool(
+            title="Manage Markdown scope",
+            description=(
+                "Create, update, delete, or refresh one Markdown scope. create/update roots "
+                "must remain underneath the machine-local browse root. The browse root "
+                "cannot be changed through MCP. delete requires confirm=true and removes "
+                "scope exposure/config only; durable index cleanup is separate."
+            ),
+            annotations=MANAGE_LOCAL,
+            meta=manage_security_meta,
+        )
+        def manage_markdown_scope(
+            action: Literal["create", "update", "delete", "refresh"],
+            name: Annotated[str, Field(min_length=1, max_length=128)],
+            root: Annotated[str | None, Field(min_length=1, max_length=2048)] = None,
+            namespace: Annotated[str | None, Field(min_length=1, max_length=128)] = None,
+            recursive: bool | None = None,
+            mode: Literal["include_all_except", "include_only"] | None = None,
+            include: list[str] | None = None,
+            exclude: list[str] | None = None,
+            chunk_profile: str | None = None,
+            template_scope: Annotated[str | None, Field(min_length=1, max_length=128)] = None,
+            confirm: bool = False,
+            response_format: Annotated[
+                ResponseFormat,
+                Field(description="compact is token-efficient default; use json for exact structured metadata."),
+            ] = "compact",
+        ) -> CallToolResult:
+            payload = service.manage_scope(
+                action=action,
+                name=name,
+                root=root,
+                namespace=namespace,
+                recursive=recursive,
+                mode=mode,
+                include=include,
+                exclude=exclude,
+                chunk_profile=chunk_profile,
+                template_scope=template_scope,
+                confirm=confirm,
+            )
+            return tool_result(payload, format_manage(payload), response_format=response_format)
 
     return mcp
 
