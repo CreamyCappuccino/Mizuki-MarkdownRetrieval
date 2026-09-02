@@ -30,6 +30,7 @@ class RemoteOAuthConfig:
     resource: str
     jwks_url: str
     required_scope: str
+    manage_scope: str | None = None
     clock_skew_seconds: int = 30
     max_token_lifetime_seconds: int = 3600
     jwks_timeout_seconds: float = 5.0
@@ -46,6 +47,13 @@ class RemoteOAuthConfig:
             raise ValueError("required_scope must be exactly one non-empty scope")
         if len(self.required_scope) > 128:
             raise ValueError("required_scope is too long")
+        if self.manage_scope is not None:
+            if not self.manage_scope.strip() or " " in self.manage_scope.strip():
+                raise ValueError("manage_scope must be exactly one non-empty scope")
+            if len(self.manage_scope) > 128:
+                raise ValueError("manage_scope is too long")
+            if self.manage_scope == self.required_scope:
+                raise ValueError("manage_scope must differ from required_scope")
         if not 0 <= self.clock_skew_seconds <= 300:
             raise ValueError("clock_skew_seconds must be between 0 and 300")
         if not 60 <= self.max_token_lifetime_seconds <= 86_400:
@@ -79,7 +87,8 @@ class RemoteOAuthConfig:
             raise ValueError(f"remote OAuth configuration is partial; missing: {missing}")
         if not present:
             raise ValueError("remote OAuth configuration is not set")
-        return cls(**values)
+        manage_scope = source.get("MDR_REMOTE_MANAGE_SCOPE", "").strip() or None
+        return cls(**values, manage_scope=manage_scope)
 
 
 class SharedOAuthJWTVerifier(TokenVerifier):
