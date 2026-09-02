@@ -61,7 +61,7 @@ def build_server(
 
     service = ReadOnlyRetrievalService.from_config(config_path)
     mcp = MCPServer(
-        "mizuki-markdown-retrieval",
+        "markdown-retrieval",
         instructions=(
             "Markdown workspace browsing and retrieval over an owner-configured local root. "
             "Browse directories and Markdown files, manage scopes inside that root, search indexed chunks, "
