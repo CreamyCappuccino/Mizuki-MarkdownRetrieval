@@ -182,7 +182,6 @@ def test_http_resource_server_exposes_discovery_auth_gate_and_safe_tool(
                     tools = await client.list_tools()
                     assert [tool.name for tool in tools.tools] == [
                         "browse_markdown_filesystem",
-                        "manage_markdown_scope",
                         "list_markdown_scopes",
                         "list_markdown_files",
                         "search_related_markdown",
