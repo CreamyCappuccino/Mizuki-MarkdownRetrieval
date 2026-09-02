@@ -25,6 +25,8 @@ def test_mcp_tools_have_explicit_read_only_local_annotations(tmp_path: Path) -> 
     tools = asyncio.run(server.list_tools())
 
     assert [tool.name for tool in tools] == [
+        "browse_markdown_filesystem",
+        "manage_markdown_scope",
         "list_markdown_scopes",
         "list_markdown_files",
         "search_related_markdown",
@@ -34,10 +36,16 @@ def test_mcp_tools_have_explicit_read_only_local_annotations(tmp_path: Path) -> 
         assert tool.title
         assert tool.description
         assert tool.annotations is not None
+        assert tool.annotations.open_world_hint is False
+    read_only = [tool for tool in tools if tool.name != "manage_markdown_scope"]
+    for tool in read_only:
         assert tool.annotations.read_only_hint is True
         assert tool.annotations.destructive_hint is False
         assert tool.annotations.idempotent_hint is True
-        assert tool.annotations.open_world_hint is False
+    manage = next(tool for tool in tools if tool.name == "manage_markdown_scope")
+    assert manage.annotations.read_only_hint is False
+    assert manage.annotations.destructive_hint is True
+    assert manage.annotations.idempotent_hint is False
 
 
 def test_mcp_search_schema_is_constrained(tmp_path: Path) -> None:
@@ -118,3 +126,46 @@ def test_mcp_read_tool_json_is_explicit_and_not_duplicated_as_text(tmp_path: Pat
     assert result.structured_content["line_start"] == 2
     assert result.structured_content["line_end"] == 2
     assert result.structured_content["text"] == "keep this aligned\n"
+
+
+def test_mcp_browse_and_scope_create_are_workspace_bounded(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    docs = workspace / "docs"
+    project_dir = workspace / "projects" / "alpha"
+    docs.mkdir(parents=True)
+    project_dir.mkdir(parents=True)
+    (project_dir / "README.md").write_text("# alpha\n", encoding="utf-8")
+    config = tmp_path / "markdown-retrieval.toml"
+    config.write_text(
+        (
+            '[workspace]\n'
+            f'root = "{workspace.as_posix()}"\n\n'
+            '[[scope]]\n'
+            'name = "demo"\n'
+            'namespace = "demo"\n'
+            f'root = "{docs.as_posix()}"\n'
+            f'state_path = "{(tmp_path / "state/demo.index-state.json").as_posix()}"\n\n'
+            '[scope.search]\n'
+            'database_url_env = "MDR_TEST_MISSING_DATABASE_URL"\n'
+            'schema = "mdr_demo"\n'
+            'vector_dimensions = 3\n'
+            'representation_revision = "fixture-v1"\n'
+        ),
+        encoding="utf-8",
+    )
+    server = build_server(config)
+
+    browse = asyncio.run(server.call_tool("browse_markdown_filesystem", {"path": "projects", "depth": 2}))
+    assert browse.is_error is False
+    assert browse.structured_content is None
+    assert "projects/alpha" in browse.content[0].text
+    assert "projects/alpha/README.md" in browse.content[0].text
+
+    created = asyncio.run(server.call_tool("manage_markdown_scope", {"action": "create", "name": "alpha", "root": "projects/alpha"}))
+    assert created.is_error is False
+    assert "scope=alpha" in created.content[0].text
+    scopes = asyncio.run(server.call_tool("list_markdown_scopes", {}))
+    assert "alpha" in scopes.content[0].text
+
+    escaped = asyncio.run(server.call_tool("manage_markdown_scope", {"action": "create", "name": "escape", "root": "../outside"}))
+    assert escaped.is_error is True
