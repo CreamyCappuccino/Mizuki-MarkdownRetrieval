@@ -88,3 +88,35 @@ def _location(path: Any, line_start: Any, line_end: Any) -> str:
 
 def _bool(value: Any) -> str:
     return "true" if value else "false"
+
+
+def format_browse(payload: dict[str, Any]) -> str:
+    lines = [
+        f"path={payload['path']} items={payload['count']}/{payload['total']} "
+        f"truncated={_bool(payload['truncated'])}"
+    ]
+    for item in payload["items"]:
+        marker = "dir" if item["type"] == "dir" else "md"
+        suffix = "/" if marker == "dir" else ""
+        lines.append(f"- [{marker}] {item['path']}{suffix}")
+    return "\n".join(lines)
+
+
+def format_manage(payload: dict[str, Any]) -> str:
+    action = payload.get("action", "?")
+    scope = payload.get("scope", "?")
+    status = payload.get("status", "ok")
+    if action == "refresh":
+        return (
+            f"scope={scope} action=refresh files={payload.get('discovered_count')} "
+            f"changed={payload.get('changed_count')} status={payload.get('status')}"
+        )
+    lines = [f"scope={scope} action={action} status={status}"]
+    if action != "delete":
+        lines.append(
+            f"root={payload.get('root')} recursive={_bool(payload.get('recursive'))} "
+            f"mode={payload.get('mode')} search={'yes' if payload.get('search_enabled') else 'no'}"
+        )
+    elif payload.get("durable_index_retained"):
+        lines.append("durable_index_retained=true")
+    return "\n".join(lines)
