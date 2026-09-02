@@ -10,7 +10,7 @@ from mcp.server.auth.provider import TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, ToolAnnotations
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .mcp_output import (
     ResponseFormat,
@@ -41,6 +41,17 @@ SCOPE_MANAGEMENT = ToolAnnotations(
     idempotent_hint=False,
     open_world_hint=False,
 )
+
+
+class ToolOutputEnvelope(BaseModel):
+    """Minimal structured envelope advertised through MCP outputSchema.
+
+    Compact mode keeps substantive data in TextContent and publishes only the format marker.
+    JSON mode keeps the existing top-level payload and adds the same marker.
+    """
+
+    model_config = ConfigDict(extra="allow")
+    format: Literal["compact", "json"]
 
 
 def build_server(
@@ -96,7 +107,7 @@ def build_server(
             ResponseFormat,
             Field(description="compact is token-efficient default; use json only for exact structured metadata."),
         ] = "compact",
-    ) -> CallToolResult:
+    ) -> Annotated[CallToolResult, ToolOutputEnvelope]:
         try:
             payload = browse_markdown_workspace(
                 service.project,
@@ -141,7 +152,7 @@ def build_server(
                 ResponseFormat,
                 Field(description="compact is token-efficient default; use json only for exact structured metadata."),
             ] = "compact",
-        ) -> CallToolResult:
+        ) -> Annotated[CallToolResult, ToolOutputEnvelope]:
             _require_scope(manage_security_scope)
             try:
                 if action == "get":
@@ -212,7 +223,7 @@ def build_server(
             ResponseFormat,
             Field(description="compact is token-efficient default; use json only for exact structured metadata."),
         ] = "compact",
-    ) -> CallToolResult:
+    ) -> Annotated[CallToolResult, ToolOutputEnvelope]:
         payload = service.list_scopes(limit=limit)
         return tool_result(payload, format_scopes(payload), response_format=response_format)
 
@@ -232,7 +243,7 @@ def build_server(
             ResponseFormat,
             Field(description="compact is token-efficient default; use json only for exact structured metadata."),
         ] = "compact",
-    ) -> CallToolResult:
+    ) -> Annotated[CallToolResult, ToolOutputEnvelope]:
         payload = service.list_files(scope, limit=limit)
         return tool_result(payload, format_files(payload), response_format=response_format)
 
@@ -260,7 +271,7 @@ def build_server(
             ResponseFormat,
             Field(description="compact omits internal IDs/hashes; use json only when exact structured metadata is needed."),
         ] = "compact",
-    ) -> CallToolResult:
+    ) -> Annotated[CallToolResult, ToolOutputEnvelope]:
         payload = service.search_related(
             scope,
             mode=mode,
@@ -309,7 +320,7 @@ def build_server(
             ResponseFormat,
             Field(description="compact is token-efficient default; use json only for exact structured metadata."),
         ] = "compact",
-    ) -> CallToolResult:
+    ) -> Annotated[CallToolResult, ToolOutputEnvelope]:
         payload = service.read(
             scope,
             path,
