@@ -130,7 +130,7 @@ def test_stdio_mcp_client_launches_real_server_process_and_reads_safely(tmp_path
         async with Client(stdio_client(server)) as client:
             assert client.server_capabilities.tools is not None
             assert client.server_info is not None
-            assert client.server_info.name == "mizuki-markdown-retrieval"
+            assert client.server_info.name == "markdown-retrieval"
 
             tools = await client.list_tools()
             assert [tool.name for tool in tools.tools] == [
