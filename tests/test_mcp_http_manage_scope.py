@@ -33,12 +33,16 @@ class ScopeVerifier(TokenVerifier):
 
 
 def _config(tmp_path: Path) -> Path:
-    docs = tmp_path / "docs"
-    docs.mkdir()
+    workspace = tmp_path / "workspace"
+    docs = workspace / "docs"
+    project = workspace / "projects" / "alpha"
+    docs.mkdir(parents=True)
+    project.mkdir(parents=True)
     (docs / "rules.md").write_text("# Rules\nkeep aligned\n", encoding="utf-8")
+    (project / "README.md").write_text("# Alpha\n", encoding="utf-8")
     config = tmp_path / "markdown-retrieval.toml"
     config.write_text(
-        f'''[[scope]]\nname = "demo"\nnamespace = "demo"\nroot = "{docs.as_posix()}"\n''',
+        f'''[workspace]\nroot = "{workspace.as_posix()}"\n\n[[scope]]\nname = "demo"\nnamespace = "demo"\nroot = "{docs.as_posix()}"\n''',
         encoding="utf-8",
     )
     return config
@@ -129,5 +133,41 @@ def test_manage_scope_is_advertised_but_enforced_only_on_management_tool(
                     )
                     assert accepted.is_error is False
                     assert accepted.structured_content["scope"] == "demo"
+
+                    created = await client.call_tool(
+                        "manage_markdown_scope",
+                        {
+                            "action": "create",
+                            "name": "alpha",
+                            "root": "projects/alpha",
+                            "response_format": "json",
+                        },
+                    )
+                    assert created.is_error is False
+                    assert created.structured_content["scope"] == "alpha"
+
+                    updated = await client.call_tool(
+                        "manage_markdown_scope",
+                        {
+                            "action": "update",
+                            "name": "alpha",
+                            "recursive": False,
+                            "mode": "include_only",
+                            "include": ["README.md"],
+                            "response_format": "json",
+                        },
+                    )
+                    assert updated.is_error is False
+                    assert updated.structured_content["scope"] == "alpha"
+                    assert updated.structured_content["recursive"] is False
+                    assert updated.structured_content["mode"] == "include_only"
+                    assert updated.structured_content["include"] == ["README.md"]
+
+                    after_update = await client.call_tool(
+                        "list_markdown_scopes",
+                        {"limit": 10, "response_format": "json"},
+                    )
+                    assert after_update.is_error is False
+                    assert {item["scope"] for item in after_update.structured_content["items"]} == {"demo", "alpha"}
 
     asyncio.run(scenario())
