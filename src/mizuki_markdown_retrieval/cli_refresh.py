@@ -18,24 +18,13 @@ class DurableIndexDriftError(RuntimeError):
     pass
 
 
-def refresh_scope(
-    runtime: RuntimeScope,
-    *,
-    toolkit: Any | None = None,
-) -> dict[str, object]:
-    """Build/apply one durable pgvector refresh and return its compact receipt payload."""
-
-    with exclusive_refresh_lock(runtime.state_path):
-        return _refresh_scope_locked(runtime, toolkit=toolkit)
-
-
 def run_refresh_command(
     runtime: RuntimeScope,
     *,
     json_output: bool = False,
     toolkit: Any | None = None,
 ) -> int:
-    """CLI wrapper around :func:`refresh_scope`."""
+    """Build/apply one durable pgvector index refresh from the configured scope."""
 
     payload = refresh_scope(runtime, toolkit=toolkit)
     if json_output:
@@ -49,6 +38,17 @@ def run_refresh_command(
         if payload["apply_id"] is not None:
             print(f"apply_id={payload['apply_id']}")
     return 0
+
+
+def refresh_scope(
+    runtime: RuntimeScope,
+    *,
+    toolkit: Any | None = None,
+) -> dict[str, object]:
+    """Refresh one scope without writing human CLI output."""
+
+    with exclusive_refresh_lock(runtime.state_path):
+        return _refresh_scope_locked(runtime, toolkit=toolkit)
 
 
 def _refresh_scope_locked(
