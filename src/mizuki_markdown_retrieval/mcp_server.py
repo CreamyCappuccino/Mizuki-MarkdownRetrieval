@@ -108,89 +108,92 @@ def build_server(
             raise ToolError(str(exc)) from exc
         return tool_result(payload, format_browse(payload), response_format=response_format)
 
-    @mcp.tool(
-        title="Manage Markdown scope",
-        description=(
-            "Get, create, update, delete, or refresh one Markdown retrieval scope. "
-            "Scope roots must remain inside the owner-configured workspace root; MCP cannot change that root. "
-            "Create inherits private SearchE/Postgres/model settings from an existing template scope and never exposes them."
-        ),
-        annotations=SCOPE_MANAGEMENT,
-        meta=manage_security_meta,
-    )
-    def manage_markdown_scope(
-        action: Literal["get", "create", "update", "delete", "refresh"],
-        name: Annotated[str, Field(min_length=1, max_length=128)],
-        root: Annotated[
-            str | None,
-            Field(max_length=2048, description="Relative directory under the configured workspace root."),
-        ] = None,
-        namespace: Annotated[str | None, Field(max_length=128)] = None,
-        recursive: bool | None = None,
-        mode: Literal["include_all_except", "include_only"] | None = None,
-        include: list[str] | None = None,
-        exclude: list[str] | None = None,
-        chunk_profile: str | None = None,
-        template_scope: Annotated[str | None, Field(max_length=128)] = None,
-        confirm: bool = False,
-        response_format: Annotated[
-            ResponseFormat,
-            Field(description="compact is token-efficient default; use json only for exact structured metadata."),
-        ] = "compact",
-    ) -> CallToolResult:
-        try:
-            if action == "get":
-                payload = {"action": action, **describe_scope(service.project, name)}
-            elif action == "create":
-                if root is None:
-                    raise ValueError("root is required for create")
-                if Path(root).is_absolute():
-                    raise ValueError("MCP scope root must be relative to the configured workspace root")
-                payload = {
-                    "action": action,
-                    **create_scope(
-                        service.config_path,
-                        name=name,
-                        root=root,
-                        namespace=namespace,
-                        recursive=True if recursive is None else recursive,
-                        mode="include_all_except" if mode is None else mode,
-                        include=() if include is None else include,
-                        exclude=() if exclude is None else exclude,
-                        chunk_profile=chunk_profile,
-                        template_scope=template_scope,
-                    ),
-                }
-                service.reload_project()
-            elif action == "update":
-                if root is not None and Path(root).is_absolute():
-                    raise ValueError("MCP scope root must be relative to the configured workspace root")
-                payload = {
-                    "action": action,
-                    **update_scope(
-                        service.config_path,
-                        name=name,
-                        root=root,
-                        namespace=namespace,
-                        recursive=recursive,
-                        mode=mode,
-                        include=include,
-                        exclude=exclude,
-                        chunk_profile=chunk_profile,
-                    ),
-                }
-                service.reload_project()
-            elif action == "delete":
-                if not confirm:
-                    raise ValueError("delete requires confirm=true")
-                payload = {"action": action, **delete_scope(service.config_path, name=name)}
-                service.reload_project()
-            else:
-                runtime = service.project.get_scope(name)
-                payload = {"action": action, **refresh_scope(runtime)}
-            return tool_result(payload, format_scope_management(payload), response_format=response_format)
-        except (ProjectConfigError, FileNotFoundError, NotADirectoryError, ValueError) as exc:
-            raise ToolError(str(exc)) from exc
+    # Local stdio may manage scopes directly. Remote HTTP exposes the mutation tool only
+    # when the owner explicitly configures a distinct management OAuth scope.
+    if token_verifier is None or manage_security_scope is not None:
+        @mcp.tool(
+            title="Manage Markdown scope",
+            description=(
+                "Get, create, update, delete, or refresh one Markdown retrieval scope. "
+                "Scope roots must remain inside the owner-configured workspace root; MCP cannot change that root. "
+                "Create inherits private SearchE/Postgres/model settings from an existing template scope and never exposes them."
+            ),
+            annotations=SCOPE_MANAGEMENT,
+            meta=manage_security_meta,
+        )
+        def manage_markdown_scope(
+            action: Literal["get", "create", "update", "delete", "refresh"],
+            name: Annotated[str, Field(min_length=1, max_length=128)],
+            root: Annotated[
+                str | None,
+                Field(max_length=2048, description="Relative directory under the configured workspace root."),
+            ] = None,
+            namespace: Annotated[str | None, Field(max_length=128)] = None,
+            recursive: bool | None = None,
+            mode: Literal["include_all_except", "include_only"] | None = None,
+            include: list[str] | None = None,
+            exclude: list[str] | None = None,
+            chunk_profile: str | None = None,
+            template_scope: Annotated[str | None, Field(max_length=128)] = None,
+            confirm: bool = False,
+            response_format: Annotated[
+                ResponseFormat,
+                Field(description="compact is token-efficient default; use json only for exact structured metadata."),
+            ] = "compact",
+        ) -> CallToolResult:
+            try:
+                if action == "get":
+                    payload = {"action": action, **describe_scope(service.project, name)}
+                elif action == "create":
+                    if root is None:
+                        raise ValueError("root is required for create")
+                    if Path(root).is_absolute():
+                        raise ValueError("MCP scope root must be relative to the configured workspace root")
+                    payload = {
+                        "action": action,
+                        **create_scope(
+                            service.config_path,
+                            name=name,
+                            root=root,
+                            namespace=namespace,
+                            recursive=True if recursive is None else recursive,
+                            mode="include_all_except" if mode is None else mode,
+                            include=() if include is None else include,
+                            exclude=() if exclude is None else exclude,
+                            chunk_profile=chunk_profile,
+                            template_scope=template_scope,
+                        ),
+                    }
+                    service.reload_project()
+                elif action == "update":
+                    if root is not None and Path(root).is_absolute():
+                        raise ValueError("MCP scope root must be relative to the configured workspace root")
+                    payload = {
+                        "action": action,
+                        **update_scope(
+                            service.config_path,
+                            name=name,
+                            root=root,
+                            namespace=namespace,
+                            recursive=recursive,
+                            mode=mode,
+                            include=include,
+                            exclude=exclude,
+                            chunk_profile=chunk_profile,
+                        ),
+                    }
+                    service.reload_project()
+                elif action == "delete":
+                    if not confirm:
+                        raise ValueError("delete requires confirm=true")
+                    payload = {"action": action, **delete_scope(service.config_path, name=name)}
+                    service.reload_project()
+                else:
+                    runtime = service.project.get_scope(name)
+                    payload = {"action": action, **refresh_scope(runtime)}
+                return tool_result(payload, format_scope_management(payload), response_format=response_format)
+            except (ProjectConfigError, FileNotFoundError, NotADirectoryError, ValueError) as exc:
+                raise ToolError(str(exc)) from exc
 
     @mcp.tool(
         title="List Markdown scopes",
