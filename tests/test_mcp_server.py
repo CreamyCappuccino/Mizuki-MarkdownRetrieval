@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from mcp.types import TextContent
 
 from mizuki_markdown_retrieval.mcp_server import build_server
 
@@ -81,7 +80,7 @@ def test_mcp_read_schema_requires_explicit_view_and_describes_line_intent(tmp_pa
     assert "Required for hit/around" in props["line_start"]["description"]
 
 
-def test_mcp_read_tool_defaults_to_compact_text_only(tmp_path: Path) -> None:
+def test_mcp_read_tool_defaults_to_compact_structured_text_only(tmp_path: Path) -> None:
     server = build_server(_config(tmp_path))
     result = asyncio.run(
         server.call_tool(
@@ -98,14 +97,14 @@ def test_mcp_read_tool_defaults_to_compact_text_only(tmp_path: Path) -> None:
     )
 
     assert result.is_error is False
-    assert result.structured_content == {"format": "compact"}
-    assert len(result.content) == 1
-    assert isinstance(result.content[0], TextContent)
-    assert result.content[0].text == (
-        "scope=demo path=rules.md view=hit lines=2-2/2 truncated=false\n"
-        "keep this aligned\n"
-    )
-    assert not result.content[0].text.lstrip().startswith("{")
+    assert result.content == []
+    assert result.structured_content == {
+        "format": "compact",
+        "text": (
+            "scope=demo path=rules.md view=hit lines=2-2/2 truncated=false\n"
+            "keep this aligned\n"
+        ),
+    }
 
 
 def test_mcp_read_tool_json_is_explicit_and_not_duplicated_as_text(tmp_path: Path) -> None:
@@ -164,15 +163,19 @@ def test_mcp_browse_and_scope_create_are_workspace_bounded(tmp_path: Path) -> No
 
     browse = asyncio.run(server.call_tool("browse_markdown_filesystem", {"path": "projects", "depth": 2}))
     assert browse.is_error is False
-    assert browse.structured_content == {"format": "compact"}
-    assert "projects/alpha" in browse.content[0].text
-    assert "projects/alpha/README.md" in browse.content[0].text
+    assert browse.content == []
+    assert browse.structured_content is not None
+    assert browse.structured_content["format"] == "compact"
+    assert "projects/alpha" in browse.structured_content["text"]
+    assert "projects/alpha/README.md" in browse.structured_content["text"]
 
     created = asyncio.run(server.call_tool("manage_markdown_scope", {"action": "create", "name": "alpha", "root": "projects/alpha"}))
     assert created.is_error is False
-    assert "scope=alpha" in created.content[0].text
+    assert created.structured_content is not None
+    assert "scope=alpha" in created.structured_content["text"]
     scopes = asyncio.run(server.call_tool("list_markdown_scopes", {}))
-    assert "alpha" in scopes.content[0].text
+    assert scopes.structured_content is not None
+    assert "alpha" in scopes.structured_content["text"]
 
     with pytest.raises(Exception, match="Error executing tool manage_markdown_scope"):
         asyncio.run(
