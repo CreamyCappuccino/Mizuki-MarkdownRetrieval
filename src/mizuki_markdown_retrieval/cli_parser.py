@@ -6,8 +6,8 @@ from pathlib import Path
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="mizuki-mdr",
-        description="Plan, refresh, and inspect Markdown retrieval scopes.",
+        prog="mdr",
+        description="Browse, manage, refresh, and search Markdown retrieval scopes.",
     )
     parser.add_argument(
         "--config",
@@ -17,6 +17,43 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("validate", help="validate the project config")
+
+    root = subparsers.add_parser("root", help="manage the machine-local MCP browse root")
+    root_sub = root.add_subparsers(dest="root_action", required=True)
+    root_sub.add_parser("show", help="show whether a browse root is configured")
+    root_set = root_sub.add_parser("set", help="set the local browse root; MCP cannot change it")
+    root_set.add_argument("path", help="local filesystem directory used as the browse boundary")
+    root_set.add_argument("--template-scope", help="base scope whose search/index settings new scopes inherit")
+    root_set.add_argument("--include-hidden", action=argparse.BooleanOptionalAction, default=False)
+    root_set.add_argument("--managed-scopes-path", help="optional local managed-scope TOML path")
+
+    browse = subparsers.add_parser("browse", help="list directories and Markdown files below the local browse root")
+    browse.add_argument("path", nargs="?", default=".", help="path relative to the configured browse root")
+    browse.add_argument("--limit", type=int, default=100)
+    browse.add_argument("--json", action="store_true")
+
+    scope = subparsers.add_parser("scope", help="manage scopes stored in the local managed-scope file")
+    scope_sub = scope.add_subparsers(dest="scope_action", required=True)
+    scope_sub.add_parser("list", help="list configured scopes")
+
+    create = scope_sub.add_parser("create", help="create a managed scope")
+    create.add_argument("name")
+    create.add_argument("root", help="directory below the configured browse root")
+    _add_scope_fields(create, updating=False)
+
+    update = scope_sub.add_parser("update", help="update a managed scope")
+    update.add_argument("name")
+    update.add_argument("--root", help="new directory below the configured browse root")
+    _add_scope_fields(update, updating=True)
+
+    delete = scope_sub.add_parser("delete", help="remove a managed scope from exposure/config")
+    delete.add_argument("name")
+    delete.add_argument("--confirm", action="store_true", help="required destructive confirmation")
+    delete.add_argument("--json", action="store_true")
+
+    scope_refresh = scope_sub.add_parser("refresh", help="refresh one configured scope")
+    scope_refresh.add_argument("name")
+    scope_refresh.add_argument("--json", action="store_true")
 
     discover = subparsers.add_parser("discover", help="list indexed Markdown files")
     discover.add_argument("scope", help="scope name from config")
@@ -57,6 +94,21 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--candidate-k", type=int, help="pre-group similarity candidate count")
     search.add_argument("--json", action="store_true")
     return parser
+
+
+def _add_scope_fields(parser: argparse.ArgumentParser, *, updating: bool) -> None:
+    parser.add_argument("--namespace")
+    parser.add_argument(
+        "--recursive",
+        action=argparse.BooleanOptionalAction,
+        default=None if updating else True,
+    )
+    parser.add_argument("--mode", choices=("include_all_except", "include_only"))
+    parser.add_argument("--include", action="append", help="include glob; repeatable")
+    parser.add_argument("--exclude", action="append", help="exclude glob; repeatable")
+    parser.add_argument("--chunk-profile")
+    parser.add_argument("--template-scope")
+    parser.add_argument("--json", action="store_true")
 
 
 def validate_search_selector(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
