@@ -11,7 +11,6 @@ from .discovery import discover_markdown
 from .indexing import UNSPECIFIED_PROVIDER_REVISION
 from .mcp_service import ReadOnlyRetrievalService
 from .project_config import load_project_config
-from .scope_management import write_management_settings
 from .reading import read_markdown_view
 from .refresh import prepare_refresh
 
@@ -19,98 +18,11 @@ from .refresh import prepare_refresh
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    config_path = Path(args.config).expanduser().resolve()
-    project = load_project_config(config_path)
+    project = load_project_config(Path(args.config))
 
     if args.command == "validate":
         print(f"config ok: {project.config_path}")
         print("scopes: " + ", ".join(sorted(project.scopes)))
-        return 0
-
-
-    if args.command == "root":
-        if args.root_action == "show":
-            if project.management is None:
-                print("management=disabled")
-            else:
-                print(f"management=enabled root={project.management.browse_root}")
-                print(f"template_scope={project.management.template_scope}")
-            return 0
-        template = args.template_scope
-        if template is None:
-            search_enabled = [name for name, runtime in project.scopes.items() if runtime.search is not None]
-            template = sorted(search_enabled or list(project.scopes))[0]
-        settings = write_management_settings(
-            config_path,
-            browse_root=Path(args.path),
-            template_scope=template,
-            include_hidden=args.include_hidden,
-            managed_scopes_path=Path(args.managed_scopes_path) if args.managed_scopes_path else None,
-        )
-        print(f"management root set; settings={settings}")
-        return 0
-
-    if args.command == "browse":
-        service = ReadOnlyRetrievalService(project)
-        payload = service.browse(path=args.path, limit=args.limit)
-        if args.json:
-            print(json.dumps(payload, ensure_ascii=False, indent=2))
-        else:
-            print(
-                f"path={payload['path']} items={payload['count']}/{payload['total']} "
-                f"truncated={str(payload['truncated']).lower()}"
-            )
-            for item in payload["items"]:
-                suffix = "/" if item["type"] == "dir" else ""
-                print(f"[{item['type']}] {item['path']}{suffix}")
-        return 0
-
-    if args.command == "scope":
-        service = ReadOnlyRetrievalService(project)
-        if args.scope_action == "list":
-            payload = service.list_scopes(limit=100)
-        elif args.scope_action == "create":
-            payload = service.manage_scope(
-                action="create",
-                name=args.name,
-                root=args.root,
-                namespace=args.namespace,
-                recursive=args.recursive,
-                mode=args.mode,
-                include=args.include,
-                exclude=args.exclude,
-                chunk_profile=args.chunk_profile,
-                template_scope=args.template_scope,
-            )
-        elif args.scope_action == "update":
-            payload = service.manage_scope(
-                action="update",
-                name=args.name,
-                root=args.root,
-                namespace=args.namespace,
-                recursive=args.recursive,
-                mode=args.mode,
-                include=args.include,
-                exclude=args.exclude,
-                chunk_profile=args.chunk_profile,
-                template_scope=args.template_scope,
-            )
-        elif args.scope_action == "delete":
-            payload = service.manage_scope(action="delete", name=args.name, confirm=args.confirm)
-        elif args.scope_action == "refresh":
-            payload = service.manage_scope(action="refresh", name=args.name)
-        else:
-            parser.error(f"unknown scope action: {args.scope_action}")
-            return 2
-        if getattr(args, "json", False):
-            print(json.dumps(payload, ensure_ascii=False, indent=2))
-        elif args.scope_action == "list":
-            for item in payload["items"]:
-                print(item["scope"])
-        else:
-            print(f"scope={payload.get('scope')} action={payload.get('action')} status={payload.get('status')}")
-            if "root" in payload:
-                print(f"root={payload['root']}")
         return 0
 
     runtime = project.get_scope(args.scope)
