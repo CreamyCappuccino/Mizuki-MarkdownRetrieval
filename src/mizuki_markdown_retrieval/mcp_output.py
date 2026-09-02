@@ -17,9 +17,12 @@ def tool_result(
     """Return exactly one model-facing representation to avoid duplicate token cost."""
 
     if response_format == "compact":
-        return CallToolResult(content=[TextContent(type="text", text=text)])
+        return CallToolResult(
+            content=[TextContent(type="text", text=text)],
+            structured_content={"format": "compact"},
+        )
     if response_format == "json":
-        return CallToolResult(content=[], structured_content=payload)
+        return CallToolResult(content=[], structured_content={"format": "json", **payload})
     raise ValueError(f"unsupported response_format: {response_format}")
 
 
