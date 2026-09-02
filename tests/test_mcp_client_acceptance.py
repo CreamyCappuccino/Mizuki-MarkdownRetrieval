@@ -45,6 +45,8 @@ def test_in_memory_mcp_client_accepts_read_only_surface_and_missing_db_fails_clo
             assert client.server_capabilities.tools is not None
             tools = await client.list_tools()
             assert [tool.name for tool in tools.tools] == [
+                "browse_markdown_filesystem",
+                "manage_markdown_scope",
                 "list_markdown_scopes",
                 "list_markdown_files",
                 "search_related_markdown",
@@ -132,6 +134,8 @@ def test_stdio_mcp_client_launches_real_server_process_and_reads_safely(tmp_path
 
             tools = await client.list_tools()
             assert [tool.name for tool in tools.tools] == [
+                "browse_markdown_filesystem",
+                "manage_markdown_scope",
                 "list_markdown_scopes",
                 "list_markdown_files",
                 "search_related_markdown",
