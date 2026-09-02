@@ -13,6 +13,7 @@ authors = [{ name = "Mizuki / CreamyCappuccino" }]
 dependencies = [
   "psycopg[binary]>=3.2,<4",
   "pgvector>=0.5,<1",
+  "tomlkit>=0.13,<1",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +30,10 @@ remote = [
 ]
 
 [project.scripts]
+mdr = "mizuki_markdown_retrieval.cli:main"
+mdr-mcp = "mizuki_markdown_retrieval.mcp_server:main"
+mdr-remote = "mizuki_markdown_retrieval.remote_cli:main"
+# Compatibility aliases during the transition to the neutral OSS CLI name.
 mizuki-mdr = "mizuki_markdown_retrieval.cli:main"
 mizuki-mdr-mcp = "mizuki_markdown_retrieval.mcp_server:main"
 mizuki-mdr-remote = "mizuki_markdown_retrieval.remote_cli:main"
