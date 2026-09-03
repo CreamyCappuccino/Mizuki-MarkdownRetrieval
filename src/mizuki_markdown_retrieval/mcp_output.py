@@ -3,9 +3,18 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from mcp.types import CallToolResult
+from pydantic import BaseModel, ConfigDict
 
 
 ResponseFormat = Literal["compact", "json"]
+
+
+class ToolOutputEnvelope(BaseModel):
+    """Minimal output schema for compact text or explicit structured JSON."""
+
+    model_config = ConfigDict(extra="allow")
+    format: Literal["compact", "json"]
+    text: str | None = None
 
 
 def tool_result(
@@ -99,11 +108,22 @@ def format_scope_management(payload: dict[str, Any]) -> str:
             f"scope={payload['scope']} deleted=true durable_data_preserved="
             f"{_bool(payload.get('durable_data_preserved', True))}"
         )
-    if action == "refresh":
-        return (
-            f"scope={payload['scope']} files={payload['discovered_count']} "
-            f"changed={payload['changed_count']} status={payload['status']}"
+    if action in {"refresh", "refresh_status"}:
+        line = (
+            f"scope={payload['scope']} job={payload['job_id']} "
+            f"status={payload['status']}"
         )
+        if "reused" in payload:
+            line += f" reused={_bool(payload['reused'])}"
+        if payload["status"] == "succeeded":
+            line += (
+                f" files={payload.get('discovered_count', 0)}"
+                f" changed={payload.get('changed_count', 0)}"
+                f" refresh={payload.get('refresh_status', 'unknown')}"
+            )
+        if payload["status"] in {"failed", "interrupted"}:
+            line += f" error={payload.get('error_code', 'refresh_failed')}"
+        return line
     return (
         f"scope={payload['scope']} root={payload['root']} recursive={_bool(payload['recursive'])} "
         f"mode={payload['mode']} search={'yes' if payload['search_enabled'] else 'no'} "

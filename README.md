@@ -49,6 +49,7 @@ Implemented:
 - TOML project configuration with multiple named scopes.
 - Read-only CLI commands: `validate`, `discover`, `plan`, `read`, `search`.
 - Explicit mutation command: `refresh`.
+- Persistent, retry-safe MCP refresh jobs with one owner-local execution slot.
 - Local read-only MCP v2 server.
 - Remote HTTP + Shared OAuth Resource Server implementation, with public publication kept behind a separate deployment gate.
 - GitHub Actions pytest CI.
@@ -160,7 +161,7 @@ mdr --config markdown-retrieval.toml plan rules
 
 ### Durable index refresh
 
-`refresh` is the one explicit durable-index mutation command:
+CLI `refresh` is the one explicit synchronous durable-index mutation command:
 
 ```bash
 mdr --config markdown-retrieval.toml refresh rules
@@ -174,6 +175,14 @@ It uses only the selected scope's owner-controlled configuration:
 4. commit local state only after provider success.
 
 If PostgreSQL/state drift is detected, refresh fails closed. If committed state exists but the durable schema disappeared, refresh rebuilds all current documents rather than applying an unsafe partial delta. A no-op refresh does not load Ruri or a write provider.
+
+MCP refresh is asynchronous: `manage_markdown_scope(action="refresh", ...)`
+returns a bounded `job_id` immediately, and
+`manage_markdown_scope(action="refresh_status", ..., job_id=...)` observes the
+persisted job. Retrying while the same scope is queued/running returns the same
+job instead of starting or blocking on duplicate work. The owner-local worker
+runs one refresh at a time and retains the existing refresh lock, generation
+fencing, and apply-before-state guarantee.
 
 ### Safe Markdown reads
 
@@ -212,7 +221,7 @@ Modes are `semantic`, `literal`, and `hybrid`. Literal search does not load the 
 MDR v1.1 adds two high-leverage tools without exposing arbitrary host control:
 
 - `browse_markdown_filesystem`: ls-like browsing of directories plus `.md` files under the locally configured workspace root. Paths are root-relative and symlinks are not followed.
-- `manage_markdown_scope`: one action-based tool (`get`, `create`, `update`, `delete`, `refresh`) for scope lifecycle. It cannot change the workspace root.
+- `manage_markdown_scope`: one action-based tool (`get`, `create`, `update`, `delete`, `refresh`, `refresh_status`) for scope lifecycle. It cannot change the workspace root.
 
 The existing retrieval tools remain available. Compact output is still the default; use `response_format=json` only when exact structured metadata is required.
 
@@ -227,13 +236,13 @@ mdr-mcp --config markdown-retrieval.toml
 Exposed tools:
 
 - `browse_markdown_filesystem` — ls-like directory + `.md` browsing below the owner-configured workspace root.
-- `manage_markdown_scope` — action-based `get | create | update | delete | refresh` scope management.
+- `manage_markdown_scope` — action-based `get | create | update | delete | refresh | refresh_status` scope management. Refresh starts or reuses a persistent background job.
 - `list_markdown_scopes` — bounded scope inventory without filesystem/database secrets.
 - `list_markdown_files` — bounded file paths inside one configured scope.
 - `search_related_markdown` — `semantic | literal | hybrid` related-document search from `path+line` or `document_id+chunk_id`.
 - `read_markdown` — bounded `hit | around | full` source reads.
 
-Browse/list/search/read tools remain read-only and closed-world. `manage_markdown_scope` is explicitly mutating/destructive-capable because its action set includes create/update/delete/refresh. The owner-configured workspace root is not mutable through MCP.
+Browse/list/search/read tools remain read-only and closed-world. `manage_markdown_scope` is explicitly mutating/destructive-capable because its action set includes create/update/delete/refresh. The owner-configured workspace root is not mutable through MCP. While a refresh job is active, MCP update/delete of that scope is rejected; job status remains available through the existing management repair plane even when indexed reads fail closed.
 
 The MCP surface never accepts an alternate workspace root, database URL, schema, model path, or provider revision. New scopes inherit those private search settings from an owner-configured template scope, while their schema is generated internally. Compact text is the default response; `response_format=json` returns structured content only, never a duplicate compact+JSON pair.
 

@@ -1,6 +1,6 @@
 # Long-running refresh job design
 
-Status: **design proposal / implementation gate**  
+Status: **implemented candidate / awaiting M4 acceptance**
 Date: 2026-09-03
 
 ## 1. Why this design exists
@@ -114,6 +114,29 @@ This patch does not silently serve a stale generation merely to keep `/ready` gr
 
 After a successful job commits durable index + local state, readiness should naturally return to ready. After failure/interruption, readiness remains fail-closed until repaired.
 
+This first patch intentionally does not make readiness scope-local. One stale scope may
+therefore continue to block otherwise healthy indexed reads until its job succeeds or the
+scope is repaired. That availability refinement is a separate follow-up, not an implicit
+promise of this job-lifecycle patch.
+
+### 4.5 Make acceptance and scope mutation atomic
+
+The active-job check and queued-job creation must be one locked registry transaction, not
+two independent reads. The same registry lock also guards MCP create/update/delete for the
+target scope. A refresh captures its immutable `RuntimeScope` while holding that lock.
+
+This prevents a concurrent update/delete from changing the root, namespace, state path, or
+search configuration between refresh acceptance and runtime capture. Explicit local CLI
+configuration edits remain owner-authoritative; if they bypass MCP orchestration, existing
+readiness, state, and provider fencing still fail closed.
+
+### 4.6 Keep the worker limit process-safe
+
+The default single refresh slot is protected by an owner-local file lock in addition to the
+in-process worker queue. Two MDR processes using the same registry therefore cannot run
+different Ruri refreshes concurrently. The per-state refresh lock and provider generation
+fencing remain the deeper correctness controls.
+
 ## 5. Proposed job states
 
 Minimum state machine:
@@ -163,6 +186,10 @@ The registry must not persist or expose:
 - SQL text or provider internals.
 
 A simple atomic owner-only file-backed registry is sufficient for the first implementation; the exact storage format is an implementation detail. Keep retention bounded by count and/or age so job history cannot grow without limit.
+
+Registry read/modify/write uses a cross-process lock, atomic replacement, and mode `0600`.
+Internal process ownership metadata may be stored to distinguish a live worker from a stale
+record, but it is never returned through MCP.
 
 On startup, any persisted `queued` or `running` job from the previous process becomes `interrupted`. MDR must not silently restart it.
 
@@ -321,13 +348,15 @@ This is the key semantic change from the current request-owned behavior.
 1. `refresh` returns quickly while a deliberately slow fake refresh continues.
 2. `refresh_status` observes `queued -> running -> succeeded`.
 3. duplicate refresh on the same scope returns the same active `job_id` and does not execute twice.
-4. two different scopes with default concurrency 1 do not run model work simultaneously.
-5. worker failure becomes bounded `failed`, without process death.
-6. persisted non-terminal jobs become `interrupted` after simulated restart.
-7. job history retention is bounded.
-8. existing per-state lock and generation-fencing tests remain green.
-9. readiness remains fail-closed while refresh is required/in progress and recovers after successful commit.
-10. `markdown:read` cannot start/inspect management jobs if the existing authorization contract requires `markdown:manage` for the multiplexed tool.
+4. concurrent same-scope acceptance is atomic, including across registry users.
+5. concurrent scope update/delete cannot race the accepted runtime snapshot.
+6. two different scopes with default concurrency 1 do not run model work simultaneously, including across processes sharing the registry.
+7. worker failure becomes bounded `failed`, without process death.
+8. persisted non-terminal jobs become `interrupted` after simulated restart.
+9. job history retention is bounded and registry files remain owner-only.
+10. existing per-state lock and generation-fencing tests remain green.
+11. readiness remains fail-closed while refresh is required/in progress and recovers after successful commit.
+12. `markdown:read` cannot start/inspect management jobs if the existing authorization contract requires `markdown:manage` for the multiplexed tool.
 
 ### 12.2 Real HTTP/MCP acceptance
 

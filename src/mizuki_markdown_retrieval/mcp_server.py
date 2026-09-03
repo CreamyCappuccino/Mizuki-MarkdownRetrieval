@@ -5,28 +5,28 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from mcp.server import MCPServer
-from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, ToolAnnotations
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 
 from .mcp_output import (
     ResponseFormat,
+    ToolOutputEnvelope,
     format_browse,
     format_files,
     format_read,
-    format_scope_management,
     format_scopes,
     format_search,
     tool_result,
 )
+from .mcp_scope_management import register_scope_management_tool
 from .mcp_service import ReadOnlyRetrievalService
 from .project_config import ProjectConfigError
 from .filesystem_view import browse_markdown_workspace
-from .config_management import create_scope, delete_scope, describe_scope, update_scope
 from .cli_refresh import refresh_scope
+from .refresh_jobs import RefreshJobManager
 
 READ_ONLY_LOCAL = ToolAnnotations(
     read_only_hint=True,
@@ -35,27 +35,6 @@ READ_ONLY_LOCAL = ToolAnnotations(
     open_world_hint=False,
 )
 
-SCOPE_MANAGEMENT = ToolAnnotations(
-    read_only_hint=False,
-    destructive_hint=True,
-    idempotent_hint=False,
-    open_world_hint=False,
-)
-
-
-class ToolOutputEnvelope(BaseModel):
-    """Minimal structured envelope advertised through MCP outputSchema.
-
-    Compact mode publishes one concise text field in structured content so clients that
-    prefer structuredContent do not lose the result. JSON mode keeps the existing
-    top-level payload and adds the same format marker.
-    """
-
-    model_config = ConfigDict(extra="allow")
-    format: Literal["compact", "json"]
-    text: str | None = None
-
-
 def build_server(
     config_path: str | Path,
     *,
@@ -63,6 +42,7 @@ def build_server(
     auth: AuthSettings | None = None,
     security_scope: str | None = None,
     manage_security_scope: str | None = None,
+    refresh_jobs: RefreshJobManager | None = None,
 ) -> MCPServer:
     """Build the Markdown Retrieval MCP server.
 
@@ -73,6 +53,7 @@ def build_server(
     ``securitySchemes`` field, so no unsupported protocol field is fabricated.
     """
 
+    config_path = Path(config_path).expanduser().resolve()
     service = ReadOnlyRetrievalService.from_config(config_path)
     mcp = MCPServer(
         "markdown-retrieval",
@@ -125,90 +106,17 @@ def build_server(
     # Local stdio may manage scopes directly. Remote HTTP exposes the mutation tool only
     # when the owner explicitly configures a distinct management OAuth scope.
     if token_verifier is None or manage_security_scope is not None:
-        @mcp.tool(
-            title="Manage Markdown scope",
-            description=(
-                "Get, create, update, delete, or refresh one Markdown retrieval scope. "
-                "Scope roots must remain inside the owner-configured workspace root; MCP cannot change that root. "
-                "Create inherits private SearchE/Postgres/model settings from an existing template scope and never exposes them."
-            ),
-            annotations=SCOPE_MANAGEMENT,
-            meta=manage_security_meta,
+        job_manager = refresh_jobs or RefreshJobManager(
+            config_path,
+            refresh=lambda runtime: refresh_scope(runtime),
         )
-        def manage_markdown_scope(
-            action: Literal["get", "create", "update", "delete", "refresh"],
-            name: Annotated[str, Field(min_length=1, max_length=128)],
-            root: Annotated[
-                str | None,
-                Field(max_length=2048, description="Relative directory under the configured workspace root."),
-            ] = None,
-            namespace: Annotated[str | None, Field(max_length=128)] = None,
-            recursive: bool | None = None,
-            mode: Literal["include_all_except", "include_only"] | None = None,
-            include: list[str] | None = None,
-            exclude: list[str] | None = None,
-            chunk_profile: str | None = None,
-            template_scope: Annotated[str | None, Field(max_length=128)] = None,
-            confirm: bool = False,
-            response_format: Annotated[
-                ResponseFormat,
-                Field(description="compact is token-efficient default; use json only for exact structured metadata."),
-            ] = "compact",
-        ) -> Annotated[CallToolResult, ToolOutputEnvelope]:
-            _require_scope(manage_security_scope)
-            try:
-                if action == "get":
-                    payload = {"action": action, **describe_scope(service.project, name)}
-                elif action == "create":
-                    if root is None:
-                        raise ValueError("root is required for create")
-                    if Path(root).is_absolute():
-                        raise ValueError("MCP scope root must be relative to the configured workspace root")
-                    payload = {
-                        "action": action,
-                        **create_scope(
-                            service.config_path,
-                            name=name,
-                            root=root,
-                            namespace=namespace,
-                            recursive=True if recursive is None else recursive,
-                            mode="include_all_except" if mode is None else mode,
-                            include=() if include is None else include,
-                            exclude=() if exclude is None else exclude,
-                            chunk_profile=chunk_profile,
-                            template_scope=template_scope,
-                        ),
-                    }
-                    service.reload_project()
-                elif action == "update":
-                    if root is not None and Path(root).is_absolute():
-                        raise ValueError("MCP scope root must be relative to the configured workspace root")
-                    payload = {
-                        "action": action,
-                        **update_scope(
-                            service.config_path,
-                            name=name,
-                            root=root,
-                            namespace=namespace,
-                            recursive=recursive,
-                            mode=mode,
-                            include=include,
-                            exclude=exclude,
-                            chunk_profile=chunk_profile,
-                        ),
-                    }
-                    service.reload_project()
-                elif action == "delete":
-                    if not confirm:
-                        raise ValueError("delete requires confirm=true")
-                    payload = {"action": action, **delete_scope(service.config_path, name=name)}
-                    service.reload_project()
-                else:
-                    runtime = service.project.get_scope(name)
-                    payload = {"action": action, **refresh_scope(runtime)}
-                return tool_result(payload, format_scope_management(payload), response_format=response_format)
-            except (ProjectConfigError, FileNotFoundError, NotADirectoryError, ValueError) as exc:
-                raise ToolError(str(exc)) from exc
+        register_scope_management_tool(
+            mcp,
+            service=service,
+            job_manager=job_manager,
+            manage_security_scope=manage_security_scope,
+            security_meta=manage_security_meta,
+        )
 
     @mcp.tool(
         title="List Markdown scopes",
@@ -350,14 +258,6 @@ def _security_meta(scope: str | None) -> dict[str, object] | None:
             }
         ]
     }
-
-
-def _require_scope(required_scope: str | None) -> None:
-    if required_scope is None:
-        return
-    access_token = get_access_token()
-    if access_token is None or required_scope not in access_token.scopes:
-        raise ToolError(f"Required OAuth scope: {required_scope}")
 
 
 def main() -> None:

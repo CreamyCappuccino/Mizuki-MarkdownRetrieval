@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from pathlib import Path
 
 import pytest
 
 
 from mizuki_markdown_retrieval.mcp_server import build_server
+from mizuki_markdown_retrieval.refresh_jobs import RefreshJobManager
 
 
 def _config(tmp_path: Path) -> Path:
@@ -66,6 +68,108 @@ def test_mcp_search_schema_is_constrained(tmp_path: Path) -> None:
     assert props["candidate_k"]["anyOf"][0]["maximum"] == 200
     assert props["response_format"]["enum"] == ["compact", "json"]
     assert props["response_format"]["default"] == "compact"
+
+
+def test_mcp_refresh_is_observable_retry_safe_job(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+    calls = 0
+
+    def slow_refresh(runtime):
+        nonlocal calls
+        calls += 1
+        started.set()
+        assert release.wait(2)
+        return {
+            "scope": runtime.name,
+            "discovered_count": 3,
+            "changed_count": 2,
+            "status": "applied",
+        }
+
+    manager = RefreshJobManager(
+        config,
+        registry_path=tmp_path / "jobs.json",
+        refresh=slow_refresh,
+    )
+    server = build_server(config, refresh_jobs=manager)
+    tools = asyncio.run(server.list_tools())
+    manage = next(tool for tool in tools if tool.name == "manage_markdown_scope")
+    props = manage.input_schema["properties"]
+
+    assert props["action"]["enum"] == [
+        "get",
+        "create",
+        "update",
+        "delete",
+        "refresh",
+        "refresh_status",
+    ]
+    assert props["job_id"]["anyOf"][0]["maxLength"] == 64
+
+    first = asyncio.run(
+        server.call_tool(
+            "manage_markdown_scope",
+            {"action": "refresh", "name": "demo", "response_format": "json"},
+        )
+    )
+    assert first.is_error is False
+    job_id = first.structured_content["job_id"]
+    assert first.structured_content["status"] in {"queued", "running"}
+    assert first.structured_content["reused"] is False
+    assert started.wait(1)
+
+    retry = asyncio.run(
+        server.call_tool(
+            "manage_markdown_scope",
+            {"action": "refresh", "name": "demo", "response_format": "json"},
+        )
+    )
+    assert retry.structured_content["job_id"] == job_id
+    assert retry.structured_content["reused"] is True
+    assert calls == 1
+
+    with pytest.raises(Exception, match="active refresh job"):
+        asyncio.run(
+            server.call_tool(
+                "manage_markdown_scope",
+                {"action": "update", "name": "demo", "recursive": False},
+            )
+        )
+
+    observed = asyncio.run(
+        server.call_tool(
+            "manage_markdown_scope",
+            {
+                "action": "refresh_status",
+                "name": "demo",
+                "job_id": job_id,
+                "response_format": "json",
+            },
+        )
+    )
+    assert observed.structured_content["status"] == "running"
+
+    release.set()
+    manager.wait("demo", job_id)
+    finished = asyncio.run(
+        server.call_tool(
+            "manage_markdown_scope",
+            {
+                "action": "refresh_status",
+                "name": "demo",
+                "job_id": job_id,
+            },
+        )
+    )
+    assert finished.structured_content == {
+        "format": "compact",
+        "text": (
+            f"scope=demo job={job_id} status=succeeded "
+            "files=3 changed=2 refresh=applied"
+        ),
+    }
 
 
 def test_mcp_read_schema_requires_explicit_view_and_describes_line_intent(tmp_path: Path) -> None:
