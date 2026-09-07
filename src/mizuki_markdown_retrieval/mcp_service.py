@@ -9,6 +9,7 @@ from .project_config import ProjectConfig, ProjectConfigError, load_project_conf
 from .reading import read_markdown_view
 from .runtime import related_for_chunk
 from .source_resolver import resolve_source_chunk
+from .text_search import run_text_search, text_search_failure
 
 SearchMode = Literal["semantic", "literal", "hybrid"]
 ReadView = Literal["hit", "around", "full"]
@@ -103,6 +104,52 @@ class ReadOnlyRetrievalService:
             "truncated": result.truncated,
             "text": result.text,
         }
+
+    def search_text(
+        self,
+        scope_name: str,
+        query: str,
+        *,
+        mode: SearchMode = "hybrid",
+        top_k: int = 5,
+        candidate_k: int | None = None,
+    ) -> dict[str, Any]:
+        if mode not in {"semantic", "literal", "hybrid"}:
+            raise ValueError("mode must be semantic, literal, or hybrid")
+        if not query.strip():
+            raise ValueError("query must not be blank")
+        if not 1 <= top_k <= 20:
+            raise ValueError("top_k must be between 1 and 20")
+        if candidate_k is not None and not top_k <= candidate_k <= 1000:
+            raise ValueError("candidate_k must be between top_k and 1000")
+
+        runtime = self.project.get_scope(scope_name)
+        if runtime.search is None:
+            raise ProjectConfigError(f"search runtime is not configured for scope: {scope_name}")
+        if mode in {"semantic", "hybrid"} and runtime.search.model_path is None:
+            raise ProjectConfigError(
+                f"scope {scope_name} requires search.model_path for {mode} search"
+            )
+
+        try:
+            provider = self._search_provider(runtime, mode)
+            return run_text_search(
+                scope_name=runtime.name,
+                namespace=runtime.scope.namespace,
+                query=query,
+                mode=mode,
+                top_k=top_k,
+                candidate_k=candidate_k,
+                provider=provider,
+            )
+        except Exception:
+            return text_search_failure(
+                runtime.name,
+                runtime.scope.namespace,
+                query,
+                code="provider_unavailable",
+                message="configured search backend is unavailable",
+            )
 
     def search_related(
         self,
