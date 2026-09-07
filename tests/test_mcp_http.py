@@ -185,6 +185,7 @@ def test_http_resource_server_exposes_discovery_auth_gate_and_safe_tool(
                         "list_markdown_scopes",
                         "list_markdown_files",
                         "search_related_markdown",
+                        "search_markdown",
                         "read_markdown",
                     ]
                     expected_security = {
