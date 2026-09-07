@@ -67,3 +67,33 @@ def test_heading_like_text_inside_code_fence_does_not_change_heading(tmp_path: P
 
     assert len(chunks) == 1
     assert chunks[0].heading_path == ("Real",)
+
+
+def test_markdown_table_rows_are_structural_chunks_with_row_locators(tmp_path: Path) -> None:
+    indexed = _indexed(
+        tmp_path,
+        "# Limits\n\n| Rule | Value |\n| --- | --- |\n| deployment | 60% |\n| reserve | 40% |\n",
+    )
+
+    chunks = chunk_markdown(indexed)
+    table_chunks = [chunk for chunk in chunks if chunk.metadata.get("structure") == "table_row"]
+
+    assert len(table_chunks) == 2
+    assert table_chunks[0].content == "| Rule | Value |\n| deployment | 60% |"
+    assert table_chunks[1].content == "| Rule | Value |\n| reserve | 40% |"
+    assert [chunk.line_start for chunk in table_chunks] == [5, 6]
+    assert [chunk.line_end for chunk in table_chunks] == [5, 6]
+    assert all(chunk.heading_path == ("Limits",) for chunk in table_chunks)
+    assert all(chunk.metadata["chunker_revision"] == "markdown-chunker-v2-table-aware" for chunk in table_chunks)
+
+
+def test_table_like_text_inside_fence_remains_plain_chunk(tmp_path: Path) -> None:
+    indexed = _indexed(
+        tmp_path,
+        "# Example\n```md\n| A | B |\n| --- | --- |\n| x | y |\n```\n",
+    )
+
+    chunks = chunk_markdown(indexed)
+
+    assert len(chunks) == 1
+    assert chunks[0].metadata.get("structure") is None
