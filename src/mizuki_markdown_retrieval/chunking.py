@@ -16,6 +16,9 @@ class ChunkProfile:
     overlap_chars: int
 
 
+CHUNKER_REVISION = "markdown-chunker-v2-table-aware"
+
+
 CHUNK_PROFILES: dict[str, ChunkProfile] = {
     "small": ChunkProfile("small", 400, 550, 750, 60),
     "medium": ChunkProfile("medium", 650, 850, 1100, 90),
@@ -42,6 +45,9 @@ class _Section:
 class _Piece:
     heading_path: tuple[str, ...]
     lines: tuple[_Line, ...]
+    line_start: int | None = None
+    line_end: int | None = None
+    structure: str = "text"
 
 
 def chunk_markdown(
@@ -73,9 +79,13 @@ def chunk_markdown(
                 content_hash=sha256_text(content),
                 relative_path=indexed_file.document.relative_path,
                 heading_path=piece.heading_path,
-                line_start=piece.lines[0].number,
-                line_end=piece.lines[-1].number,
-                metadata={"chunk_profile": resolved.name},
+                line_start=piece.line_start or piece.lines[0].number,
+                line_end=piece.line_end or piece.lines[-1].number,
+                metadata={
+                    "chunk_profile": resolved.name,
+                    "chunker_revision": CHUNKER_REVISION,
+                    **({"structure": piece.structure} if piece.structure != "text" else {}),
+                },
             )
         )
     return chunks
@@ -140,17 +150,87 @@ def _split_section(section: _Section, profile: ChunkProfile) -> list[_Piece]:
         return []
 
     pieces: list[_Piece] = []
+    plain: list[_Line] = []
+    fence_marker: str | None = None
+    lines = list(section.lines)
+    index = 0
+
+    def flush_plain() -> None:
+        nonlocal plain
+        if plain:
+            pieces.extend(_split_plain_lines(section.heading_path, plain, profile))
+            plain = []
+
+    while index < len(lines):
+        line = lines[index]
+        fence_match = _FENCE_RE.match(line.text)
+        if fence_match:
+            marker = fence_match.group(1)
+            plain.append(line)
+            if fence_marker is None:
+                fence_marker = marker
+            elif marker.startswith(fence_marker[0]):
+                fence_marker = None
+            index += 1
+            continue
+
+        if (
+            fence_marker is None
+            and index + 1 < len(lines)
+            and _is_table_row(line.text)
+            and _is_table_separator(lines[index + 1].text)
+        ):
+            header = line
+            separator = lines[index + 1]
+            row_index = index + 2
+            rows: list[_Line] = []
+            while row_index < len(lines) and _is_table_row(lines[row_index].text):
+                rows.append(lines[row_index])
+                row_index += 1
+
+            if rows:
+                flush_plain()
+                for row in rows:
+                    pieces.append(
+                        _Piece(
+                            section.heading_path,
+                            (header, row),
+                            line_start=row.number,
+                            line_end=row.number,
+                            structure="table_row",
+                        )
+                    )
+                index = row_index
+                continue
+
+            plain.extend((header, separator))
+            index += 2
+            continue
+
+        plain.append(line)
+        index += 1
+
+    flush_plain()
+    return pieces
+
+
+def _split_plain_lines(
+    heading_path: tuple[str, ...],
+    lines: list[_Line],
+    profile: ChunkProfile,
+) -> list[_Piece]:
+    pieces: list[_Piece] = []
     current: list[_Line] = []
     current_chars = 0
 
-    for line in section.lines:
+    for line in lines:
         line_chars = len(line.text)
         if line_chars > profile.hard_chars:
             if current:
-                pieces.append(_Piece(section.heading_path, tuple(current)))
+                pieces.append(_Piece(heading_path, tuple(current)))
                 current = []
                 current_chars = 0
-            pieces.extend(_hard_cut_line(section.heading_path, line, profile))
+            pieces.extend(_hard_cut_line(heading_path, line, profile))
             continue
 
         candidate_chars = current_chars + line_chars
@@ -160,7 +240,7 @@ def _split_section(section: _Section, profile: ChunkProfile) -> list[_Piece]:
             or (candidate_chars > profile.hard_chars)
         )
         if should_flush:
-            pieces.append(_Piece(section.heading_path, tuple(current)))
+            pieces.append(_Piece(heading_path, tuple(current)))
             current = _overlap_lines(current, profile.overlap_chars)
             current_chars = sum(len(item.text) for item in current)
 
@@ -168,8 +248,21 @@ def _split_section(section: _Section, profile: ChunkProfile) -> list[_Piece]:
         current_chars += line_chars
 
     if current and any(line.text.strip() for line in current):
-        pieces.append(_Piece(section.heading_path, tuple(current)))
+        pieces.append(_Piece(heading_path, tuple(current)))
     return pieces
+
+
+def _is_table_row(text: str) -> bool:
+    stripped = text.strip()
+    return bool(stripped) and "|" in stripped
+
+
+def _is_table_separator(text: str) -> bool:
+    stripped = text.strip().strip("|").strip()
+    if "|" not in text or not stripped:
+        return False
+    cells = [cell.strip() for cell in stripped.split("|")]
+    return bool(cells) and all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells)
 
 
 def _overlap_lines(lines: list[_Line], overlap_chars: int) -> list[_Line]:
