@@ -33,6 +33,7 @@ def test_mcp_tools_have_explicit_read_only_local_annotations(tmp_path: Path) -> 
         "list_markdown_scopes",
         "list_markdown_files",
         "search_related_markdown",
+        "search_markdown",
         "read_markdown",
     ]
     for tool in tools:
@@ -68,6 +69,13 @@ def test_mcp_search_schema_is_constrained(tmp_path: Path) -> None:
     assert props["candidate_k"]["anyOf"][0]["maximum"] == 200
     assert props["response_format"]["enum"] == ["compact", "json"]
     assert props["response_format"]["default"] == "compact"
+
+    text_search = next(tool for tool in tools if tool.name == "search_markdown")
+    text_props = text_search.input_schema["properties"]
+    assert text_props["query"]["minLength"] == 1
+    assert text_props["top_k"]["maximum"] == 20
+    assert text_props["candidate_k"]["anyOf"][0]["maximum"] == 1000
+    assert text_props["response_format"]["default"] == "compact"
 
 
 def test_mcp_refresh_is_observable_retry_safe_job(tmp_path: Path) -> None:
