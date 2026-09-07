@@ -97,6 +97,7 @@ def test_manage_scope_is_advertised_but_enforced_only_on_management_tool(
                         "list_markdown_scopes",
                         "list_markdown_files",
                         "search_related_markdown",
+                        "search_markdown",
                         "read_markdown",
                     ]
                     manage = next(tool for tool in tools.tools if tool.name == "manage_markdown_scope")
