@@ -79,6 +79,22 @@ def format_search(payload: dict[str, Any], *, mode: str) -> str:
     return "\n".join(lines)
 
 
+
+def format_text_search(payload: dict[str, Any], *, mode: str) -> str:
+    lines = [f"scope={payload['scope']} mode={mode} results={len(payload['items'])}"]
+    error = payload.get("error")
+    if error is not None:
+        lines.append(f"error={error['code']}: {error['message']}")
+    for index, item in enumerate(payload["items"], start=1):
+        heading = " > ".join(item.get("heading_path") or []) or "-"
+        score = item.get("score")
+        score_text = "-" if score is None else f"{score:.4f}"
+        lines.append(
+            f"{index}. {_location(item.get('path'), item.get('line_start'), item.get('line_end'))} "
+            f"| score={score_text} | heading={heading}"
+        )
+    return "\n".join(lines)
+
 def format_read(payload: dict[str, Any]) -> str:
     header = (
         f"scope={payload['scope']} path={payload['path']} view={payload['view']} "
