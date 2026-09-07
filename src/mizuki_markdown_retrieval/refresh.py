@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
-from .chunking import chunk_markdown, resolve_profile
+from .chunking import CHUNKER_REVISION, chunk_markdown, resolve_profile
 from .config import ScopeConfig
 from .discovery import discover_markdown
 from .index_apply_bridge import build_index_apply_plan
@@ -77,7 +77,7 @@ def prepare_refresh(
 
     profile = resolve_profile(chunk_profile)
     representation_revision = (
-        "markdown-chunker-v1:"
+        f"{CHUNKER_REVISION}:"
         f"{profile.name}:"
         f"{profile.target_chars}:"
         f"{profile.soft_chars}:"
