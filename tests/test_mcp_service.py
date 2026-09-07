@@ -151,3 +151,35 @@ def test_service_sanitizes_backend_exception_details(
     assert sensitive not in repr(payload)
     assert "secret-host" not in repr(payload)
     assert "private_schema" not in repr(payload)
+
+
+def test_text_search_validates_query_and_candidate_depth(tmp_path: Path) -> None:
+    service = ReadOnlyRetrievalService.from_config(_config(tmp_path))
+
+    with pytest.raises(ValueError, match="query must not be blank"):
+        service.search_text("demo", "   ", mode="literal")
+    with pytest.raises(ValueError, match="between top_k and 1000"):
+        service.search_text("demo", "rule", mode="literal", top_k=5, candidate_k=4)
+
+
+def test_text_search_sanitizes_backend_exception_details(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = ReadOnlyRetrievalService.from_config(_config(tmp_path))
+    monkeypatch.setenv("MDR_TEST_DATABASE_URL", TEST_DATABASE_URL)
+    sensitive = "postgresql://user:password@secret-host/private-db schema=private_schema"
+
+    def fail_open(*args, **kwargs):
+        raise RuntimeError(sensitive)
+
+    monkeypatch.setattr(mcp_service, "open_postgres_search_provider", fail_open)
+
+    payload = service.search_text("demo", "deployment 60%", mode="literal", top_k=1)
+
+    assert payload["items"] == []
+    assert payload["error"] == {
+        "code": "provider_unavailable",
+        "message": "configured search backend is unavailable",
+        "details": {},
+    }
+    assert sensitive not in repr(payload)
