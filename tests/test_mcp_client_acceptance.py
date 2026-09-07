@@ -49,6 +49,7 @@ def test_in_memory_mcp_client_accepts_read_only_surface_and_missing_db_fails_clo
                 "list_markdown_scopes",
                 "list_markdown_files",
                 "search_related_markdown",
+            "search_markdown",
                 "read_markdown",
             ]
 
@@ -104,6 +105,7 @@ def test_in_memory_mcp_client_accepts_read_only_surface_and_missing_db_fails_clo
 
             missing = await client.call_tool(
                 "search_related_markdown",
+            "search_markdown",
                 {
                     "scope": "demo",
                     "mode": "literal",
@@ -142,6 +144,7 @@ def test_stdio_mcp_client_launches_real_server_process_and_reads_safely(tmp_path
                 "list_markdown_scopes",
                 "list_markdown_files",
                 "search_related_markdown",
+            "search_markdown",
                 "read_markdown",
             ]
 
@@ -166,6 +169,7 @@ def test_stdio_mcp_client_launches_real_server_process_and_reads_safely(tmp_path
 
             missing = await client.call_tool(
                 "search_related_markdown",
+            "search_markdown",
                 {
                     "scope": "demo",
                     "mode": "literal",
