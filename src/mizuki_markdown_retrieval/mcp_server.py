@@ -23,6 +23,7 @@ from .mcp_output import (
 )
 from .mcp_scope_management import register_scope_management_tool
 from .mcp_service import ReadOnlyRetrievalService
+from .mcp_text_search import register_text_search_tool
 from .project_config import ProjectConfigError
 from .filesystem_view import browse_markdown_workspace
 from .cli_refresh import refresh_scope
@@ -197,6 +198,13 @@ def build_server(
             format_search(payload, mode=mode),
             response_format=response_format,
         )
+
+    register_text_search_tool(
+        mcp,
+        service=service,
+        annotations=READ_ONLY_LOCAL,
+        security_meta=security_meta,
+    )
 
     @mcp.tool(
         title="Read Markdown",
