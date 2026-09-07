@@ -1,6 +1,6 @@
 # MDR v1.2 Search and Audit Design
 
-Status: **Draft — Retrieval Toolkit Phase A interface pending**  
+Status: **Accepted — aligned with Retrieval Toolkit Phase A design**  
 Repository: `CreamyCappuccino/Mizuki-MarkdownRetrieval`  
 Design date: 2026-09-07  
 Memory anchors: **Mizuki MM341**, **Mizuki MM348**, **Mizuki MM349**, **Mizuki MM307**, **Mizuki MM308**, **Codex MM75**, **Codex MM78**
@@ -557,17 +557,16 @@ Split the work instead of forcing one release if any of these occur:
 
 A/B should deliver value independently. C and D2 may ship later if they expand materially.
 
-## 15. Open items pending Toolkit Phase A
+## 15. Toolkit Phase A contract resolution
 
-Only the shared boundary should wait for the SearchE/Toolkit design.
+Toolkit Phase A design is accepted at SearchE commit `5464b6384a9223c60267768ea00b69026e5610fa` (`Design Toolkit arbitrary text retrieval`) with spec `docs/spec_retrieval_toolkit_text_query_2026_09_07.md`. The MDR/Toolkit boundary is therefore resolved as follows:
 
-Pending confirmations:
-
-- exact public Toolkit recipe/entrypoint name for arbitrary text retrieval;
-- final `candidate_k` semantics/default exposure;
-- deterministic tie-break contract;
-- exact error/result mapping expected at the neutral boundary;
-- whether Toolkit exposes a named impact recipe in D1 or MDR continues composition through existing public operators until then.
+- public Toolkit recipe: `retrieve_text(query: RetrievalQuery, provider: SimilarityProvider) -> RetrievalResult[Candidate]`;
+- `candidate_k` becomes an explicit optional `RetrievalQuery` field; when omitted, effective provider depth remains `max(top_k, top_k * 4)`; explicit `candidate_k` must be at least `top_k`; current provider hard ceiling remains 1000; transitional `operator_context["candidate_k"]` fallback is compatibility-only;
+- equal-score ordering must be deterministic for the same durable index/query/mode/revision, with stable chunk identity as fallback tie key;
+- invalid recipe input maps to `invalid_query`; provider failure remains `provider_failure`; empty success stays distinct from failure; any candidate escaping the requested namespace fails the result closed;
+- metadata/evidence remain opaque passthrough at the neutral boundary; SearchE score internals are not reinterpreted by Toolkit;
+- Phase A does **not** introduce a new D1 impact recipe. Existing `changed_chunk_related` remains green; a later D1 may formalize impact composition separately without blocking MDR Phase B.
 
 MDR design and implementation details that do **not** need to wait:
 
