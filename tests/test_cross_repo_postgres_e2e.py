@@ -19,6 +19,7 @@ retrieval_toolkit = pytest.importorskip(
 psycopg = pytest.importorskip("psycopg")
 
 from mizuki_markdown_retrieval.config import ScopeConfig
+from mizuki_markdown_retrieval.mcp_service import ReadOnlyRetrievalService
 from mizuki_markdown_retrieval.refresh import apply_refresh, prepare_refresh
 from mizuki_markdown_retrieval.runtime import related_for_chunk
 
@@ -149,5 +150,34 @@ def test_real_pgvector_provider_refresh_and_related_search(tmp_path) -> None:
         )
         assert durable.error is None
         assert durable.items[0].best_hit.chunk.metadata["path"] == "signal.md"
+
+        config_path = tmp_path / "markdown-retrieval.toml"
+        config_path.write_text(
+            (
+                '[[scope]]\n'
+                'name = "demo"\n'
+                f'namespace = "{namespace}"\n'
+                f'root = "{tmp_path.as_posix()}"\n\n'
+                '[scope.search]\n'
+                'database_url_env = "MDR_TEST_DATABASE_URL"\n'
+                f'schema = "{schema}"\n'
+                'vector_dimensions = 3\n'
+                f'representation_revision = "{provider_revision}"\n'
+            ),
+            encoding="utf-8",
+        )
+        service = ReadOnlyRetrievalService.from_config(config_path)
+        text_result = service.search_text(
+            "demo",
+            "confirmed close risk threshold",
+            mode="literal",
+            top_k=3,
+        )
+        assert text_result["error"] is None
+        assert text_result["items"]
+        assert any(
+            item["path"] in {"source.md", "signal.md"}
+            for item in text_result["items"]
+        )
     finally:
         _drop_schema(schema)
