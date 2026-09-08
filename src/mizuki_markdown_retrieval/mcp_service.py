@@ -132,7 +132,8 @@ class ReadOnlyRetrievalService:
             )
 
         try:
-            provider = self._search_provider(runtime, mode)
+            index_provider = self._search_provider(runtime, mode)
+            provider = index_provider.as_similarity_provider(runtime.scope.namespace)
             return run_text_search(
                 scope_name=runtime.name,
                 namespace=runtime.scope.namespace,
