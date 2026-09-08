@@ -162,6 +162,45 @@ def test_text_search_validates_query_and_candidate_depth(tmp_path: Path) -> None
         service.search_text("demo", "rule", mode="literal", top_k=5, candidate_k=4)
 
 
+
+def test_text_search_binds_persistent_provider_to_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = ReadOnlyRetrievalService.from_config(_config(tmp_path))
+    bound_provider = object()
+
+    class PersistentProvider:
+        def __init__(self) -> None:
+            self.namespaces: list[str] = []
+
+        def as_similarity_provider(self, namespace: str):
+            self.namespaces.append(namespace)
+            return bound_provider
+
+    persistent = PersistentProvider()
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(service, "_search_provider", lambda runtime, mode: persistent)
+
+    def fake_run_text_search(**kwargs):
+        captured.update(kwargs)
+        return {
+            "scope": kwargs["scope_name"],
+            "namespace": kwargs["namespace"],
+            "query": kwargs["query"],
+            "error": None,
+            "items": [],
+        }
+
+    monkeypatch.setattr(mcp_service, "run_text_search", fake_run_text_search)
+
+    payload = service.search_text("demo", "deployment 60%", mode="literal", top_k=1)
+
+    assert payload["error"] is None
+    assert persistent.namespaces == ["demo"]
+    assert captured["provider"] is bound_provider
+    assert captured["namespace"] == "demo"
+
 def test_text_search_sanitizes_backend_exception_details(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
